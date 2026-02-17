@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
+import { calculateLeadScore } from "@/lib/leadScore"
 
 export default function NewLeadPage() {
   const router = useRouter()
@@ -11,23 +12,49 @@ export default function NewLeadPage() {
   const [brand, setBrand] = useState("")
   const [platform, setPlatform] = useState("YouTube")
   const [subscribers, setSubscribers] = useState("")
+  const [value, setValue] = useState("")
+  const [warmIntro, setWarmIntro] = useState(false)
+
+  const [loading, setLoading] = useState(false)
+  const [errorMessage, setErrorMessage] = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setLoading(true)
+    setErrorMessage("")
+
+    const subscriberNumber = Number(subscribers) || 0
+    const dealValue = Number(value) || 0
+
+    const computedScore = calculateLeadScore({
+      subscribers: subscriberNumber,
+      outsourcing: false,
+      uploadsWeekly: true,
+      monetized: true,
+      warmIntro,
+    })
 
     const { error } = await supabase.from("leads").insert([
       {
         name,
-        brand_name: brand,
+        brand_name: brand || null,
         platform,
-        subscriber_count: Number(subscribers),
+        subscriber_count: subscriberNumber,
+        value: dealValue,
+        score: computedScore,
+        status: "New",
+        stage_changed_at: new Date().toISOString(),
       },
     ])
 
-    if (!error) {
-      router.push("/leads")
-      router.refresh()
+    if (error) {
+      setErrorMessage("Failed to create lead.")
+      setLoading(false)
+      return
     }
+
+    router.push("/leads")
+    router.refresh()
   }
 
   return (
@@ -38,6 +65,7 @@ export default function NewLeadPage() {
         onSubmit={handleSubmit}
         className="bg-zinc-900 text-white p-8 rounded-xl border border-zinc-800 space-y-6"
       >
+        {/* Name */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Name</label>
           <input
@@ -48,6 +76,7 @@ export default function NewLeadPage() {
           />
         </div>
 
+        {/* Brand */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Brand Name</label>
           <input
@@ -57,6 +86,7 @@ export default function NewLeadPage() {
           />
         </div>
 
+        {/* Platform */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Platform</label>
           <select
@@ -70,6 +100,7 @@ export default function NewLeadPage() {
           </select>
         </div>
 
+        {/* Subscribers */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Subscriber Count</label>
           <input
@@ -80,12 +111,43 @@ export default function NewLeadPage() {
           />
         </div>
 
+        {/* Deal Value */}
+        <div className="space-y-2">
+          <label className="text-sm text-zinc-400">Deal Value (₹)</label>
+          <input
+            type="number"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
+
+        {/* Warm Intro Toggle */}
+        <div className="flex items-center gap-3">
+          <input
+            type="checkbox"
+            checked={warmIntro}
+            onChange={() => setWarmIntro(!warmIntro)}
+            className="w-4 h-4"
+          />
+          <label className="text-sm text-zinc-400">
+            Warm Introduction?
+          </label>
+        </div>
+
+        {/* Error */}
+        {errorMessage && (
+          <div className="text-red-400 text-sm">{errorMessage}</div>
+        )}
+
+        {/* Submit */}
         <div className="pt-4">
           <button
             type="submit"
-            className="bg-zinc-100 text-black px-6 py-3 rounded-lg font-medium hover:bg-white transition"
+            disabled={loading}
+            className="bg-zinc-100 text-black px-6 py-3 rounded-lg font-medium hover:bg-white transition disabled:opacity-50"
           >
-            Create Lead
+            {loading ? "Creating..." : "Create Lead"}
           </button>
         </div>
       </form>
