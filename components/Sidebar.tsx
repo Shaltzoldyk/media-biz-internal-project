@@ -1,0 +1,38 @@
+"use client"
+
+import Link from "next/link"
+import { usePathname } from "next/navigation"
+
+const navItems = [
+  { name: "Dashboard", path: "/" },
+  { name: "Leads", path: "/leads" },
+  { name: "Pipeline", path: "/pipeline" },
+  { name: "Clients", path: "/clients" },
+  { name: "Analytics", path: "/analytics" },
+]
+
+export default function Sidebar() {
+  const pathname = usePathname()
+
+  return (
+    <div className="w-64 h-screen bg-zinc-900 text-white p-6">
+      <h1 className="text-xl font-semibold mb-8">Lead OS</h1>
+
+      <nav className="space-y-3">
+        {navItems.map((item) => (
+          <Link
+            key={item.path}
+            href={item.path}
+            className={`block px-3 py-2 rounded-md transition ${
+              pathname === item.path
+                ? "bg-zinc-700"
+                : "hover:bg-zinc-800"
+            }`}
+          >
+            {item.name}
+          </Link>
+        ))}
+      </nav>
+    </div>
+  )
+}

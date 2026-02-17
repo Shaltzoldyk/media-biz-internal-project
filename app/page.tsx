@@ -1,35 +1,10 @@
-"use client"
-
-import { useState } from "react"
-import { supabase } from "@/lib/supabase"
-
-export default function Home() {
-  const [loading, setLoading] = useState(false)
-
-  const addTestLead = async () => {
-    setLoading(true)
-
-    const { data, error } = await supabase.from("leads").insert([
-      {
-        name: "Test Creator",
-        brand_name: "Test Brand",
-        platform: "YouTube",
-        subscriber_count: 50000,
-      },
-    ])
-
-    console.log(data, error)
-    setLoading(false)
-  }
-
+export default function Dashboard() {
   return (
-    <div className="flex h-screen items-center justify-center">
-      <button
-        onClick={addTestLead}
-        className="bg-black text-white px-6 py-3 rounded"
-      >
-        {loading ? "Adding..." : "Add Test Lead"}
-      </button>
+    <div>
+      <h1 className="text-3xl font-semibold mb-6">Dashboard</h1>
+      <p className="text-zinc-600">
+        Welcome to your internal acquisition system.
+      </p>
     </div>
   )
 }
