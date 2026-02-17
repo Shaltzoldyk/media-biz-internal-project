@@ -31,52 +31,63 @@ export default function NewLeadPage() {
   }
 
   return (
-    <div>
-      <h1 className="text-3xl font-semibold mb-6">Add New Lead</h1>
+    <div className="max-w-3xl">
+      <h1 className="text-3xl font-semibold mb-10">Add New Lead</h1>
 
       <form
         onSubmit={handleSubmit}
-        className="bg-zinc-900 text-white p-6 rounded-lg space-y-4 max-w-xl border border-zinc-800"
+        className="bg-zinc-900 text-white p-8 rounded-xl border border-zinc-800 space-y-6"
       >
-        <input
-          placeholder="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          className="w-full bg-zinc-800 p-3 rounded"
-          required
-        />
+        <div className="space-y-2">
+          <label className="text-sm text-zinc-400">Name</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
+            required
+          />
+        </div>
 
-        <input
-          placeholder="Brand Name"
-          value={brand}
-          onChange={(e) => setBrand(e.target.value)}
-          className="w-full bg-zinc-800 p-3 rounded"
-        />
+        <div className="space-y-2">
+          <label className="text-sm text-zinc-400">Brand Name</label>
+          <input
+            value={brand}
+            onChange={(e) => setBrand(e.target.value)}
+            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
 
-        <select
-          value={platform}
-          onChange={(e) => setPlatform(e.target.value)}
-          className="w-full bg-zinc-800 p-3 rounded"
-        >
-          <option value="YouTube">YouTube</option>
-          <option value="Twitter">Twitter</option>
-          <option value="LinkedIn">LinkedIn</option>
-        </select>
+        <div className="space-y-2">
+          <label className="text-sm text-zinc-400">Platform</label>
+          <select
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value)}
+            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
+          >
+            <option value="YouTube">YouTube</option>
+            <option value="Twitter">Twitter</option>
+            <option value="LinkedIn">LinkedIn</option>
+          </select>
+        </div>
 
-        <input
-          placeholder="Subscriber Count"
-          type="number"
-          value={subscribers}
-          onChange={(e) => setSubscribers(e.target.value)}
-          className="w-full bg-zinc-800 p-3 rounded"
-        />
+        <div className="space-y-2">
+          <label className="text-sm text-zinc-400">Subscriber Count</label>
+          <input
+            type="number"
+            value={subscribers}
+            onChange={(e) => setSubscribers(e.target.value)}
+            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
+          />
+        </div>
 
-        <button
-          type="submit"
-          className="bg-white text-black px-4 py-2 rounded-md"
-        >
-          Create Lead
-        </button>
+        <div className="pt-4">
+          <button
+            type="submit"
+            className="bg-zinc-100 text-black px-6 py-3 rounded-lg font-medium hover:bg-white transition"
+          >
+            Create Lead
+          </button>
+        </div>
       </form>
     </div>
   )
