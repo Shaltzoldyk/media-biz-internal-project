@@ -15,5 +15,10 @@ export type Lead = {
   follow_up_date?: string | null
   last_contacted_at?: string | null
 
+  // 🔥 Phase 3 — Conversion fields
+  converted?: boolean | null
+  converted_at?: string | null
+  client_id?: string | null
+
   created_at?: string
 }

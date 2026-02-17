@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase"
-import PipelineBoard from "@/components/PipelineBoard"
+import PipelineBoardWrapper from "@/components/PipelineBoardWrapper"
 
 export default async function PipelinePage() {
   const { data: leads, error } = await supabase
@@ -13,7 +13,7 @@ export default async function PipelinePage() {
   return (
     <div>
       <h1 className="text-3xl font-semibold mb-8">Pipeline</h1>
-      <PipelineBoard leads={leads || []} />
+      <PipelineBoardWrapper leads={leads || []} />
     </div>
   )
 }

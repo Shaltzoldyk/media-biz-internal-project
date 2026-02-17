@@ -18,6 +18,7 @@ import { useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { Lead } from "@/types/lead"
 import { getStageStatus } from "@/lib/stageVelocity"
+import { convertLeadToClient } from "@/lib/conversion"
 
 const statuses = [
   "New",
@@ -48,6 +49,7 @@ export default function PipelineBoard({
     const lead = leads.find((l) => l.id === leadId)
     if (!lead || lead.status === newStatus) return
 
+    const previousStatus = lead.status
     const timestamp = new Date().toISOString()
 
     const updatePayload: any = {
@@ -55,7 +57,6 @@ export default function PipelineBoard({
       stage_changed_at: timestamp,
     }
 
-    // Auto update last_contacted_at
     if (
       newStatus === "Contacted" ||
       newStatus === "Responded" ||
@@ -64,7 +65,7 @@ export default function PipelineBoard({
       updatePayload.last_contacted_at = timestamp
     }
 
-    // Optimistic update
+    // Optimistic UI update
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId
@@ -80,10 +81,41 @@ export default function PipelineBoard({
       )
     )
 
-    await supabase
+    const { error } = await supabase
       .from("leads")
       .update(updatePayload)
       .eq("id", leadId)
+
+    if (error) {
+      // Rollback UI
+      setLeads((prev) =>
+        prev.map((l) =>
+          l.id === leadId ? { ...l, status: previousStatus } : l
+        )
+      )
+      return
+    }
+
+    // 🔥 AUTO CONVERT WHEN MOVED TO CLIENT
+    if (newStatus === "Client" && !lead.converted) {
+      try {
+        await convertLeadToClient(leadId)
+      } catch (err) {
+        console.error("Conversion failed:", err)
+
+        // Rollback to previous stage if conversion fails
+        await supabase
+          .from("leads")
+          .update({ status: previousStatus })
+          .eq("id", leadId)
+
+        setLeads((prev) =>
+          prev.map((l) =>
+            l.id === leadId ? { ...l, status: previousStatus } : l
+          )
+        )
+      }
+    }
   }
 
   const grouped = statuses.map((status) => {
@@ -112,7 +144,6 @@ export default function PipelineBoard({
   return (
     <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="w-full">
-        {/* Global Pipeline Total */}
         <div className="mb-6 text-xl font-semibold">
           Total Pipeline: ₹ {totalPipelineValue.toLocaleString()}
         </div>
