@@ -1,55 +1,107 @@
-import { createClient } from "@supabase/supabase-js"
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+import { supabase } from "@/lib/supabase"
+import { Lead } from "@/types/lead"
 
 export default async function TodayPage() {
   const today = new Date().toISOString().split("T")[0]
+  const fiveDaysAgo = new Date(
+    Date.now() - 5 * 86400000
+  ).toISOString()
 
-  const fiveDaysAgo = new Date(Date.now() - 5 * 86400000).toISOString()
+  const { data } = await supabase.from("leads").select("*")
 
-  const { data: stuck } = await supabase
-    .from("leads")
-    .select("*")
-    .lt("stage_changed_at", fiveDaysAgo)
+  const leads = (data || []) as Lead[]
 
-  const { data: followUps } = await supabase
-    .from("leads")
-    .select("*")
-    .eq("follow_up_date", today)
+  const stuckLeads = leads.filter(
+    (lead) =>
+      lead.stage_changed_at < fiveDaysAgo &&
+      lead.status !== "Client" &&
+      lead.status !== "Lost"
+  )
 
-  const { data: highPriority } = await supabase
-    .from("leads")
-    .select("*")
-    .gte("score", 7)
-    .eq("status", "New")
+  const followUps = leads.filter(
+    (lead) => lead.follow_up_date === today
+  )
+
+  const highPriority = leads.filter(
+    (lead) =>
+      (lead.score || 0) >= 7 &&
+      lead.status === "New"
+  )
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold mb-8">Today</h1>
+    <div className="space-y-12">
+      <h1 className="text-3xl font-semibold">
+        Today
+      </h1>
 
-      <section className="mb-10">
-        <h2 className="font-semibold mb-4">🔥 Stuck Leads</h2>
-        {stuck?.map((lead) => (
-          <div key={lead.id}>{lead.name}</div>
-        ))}
-      </section>
+      {/* Follow Ups */}
+      <Section title="📅 Follow Ups Today">
+        {followUps}
+      </Section>
 
-      <section className="mb-10">
-        <h2 className="font-semibold mb-4">📅 Follow Ups</h2>
-        {followUps?.map((lead) => (
-          <div key={lead.id}>{lead.name}</div>
-        ))}
-      </section>
+      {/* Stuck Leads */}
+      <Section title="🔥 Stuck Leads (5+ days)">
+        {stuckLeads}
+      </Section>
 
-      <section>
-        <h2 className="font-semibold mb-4">🚀 High Priority (Score 7+)</h2>
-        {highPriority?.map((lead) => (
-          <div key={lead.id}>{lead.name}</div>
+      {/* High Priority */}
+      <Section title="🚀 High Priority (Score 7+)">
+        {highPriority}
+      </Section>
+    </div>
+  )
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string
+  children: Lead[]
+}) {
+  if (!children.length) {
+    return (
+      <div>
+        <h2 className="text-xl font-semibold mb-4">
+          {title}
+        </h2>
+        <div className="text-zinc-500">
+          Nothing here.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <h2 className="text-xl font-semibold mb-4">
+        {title}
+      </h2>
+
+      <div className="grid gap-3">
+        {children.map((lead) => (
+          <div
+            key={lead.id}
+            className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg"
+          >
+            <div className="flex justify-between">
+              <div className="font-medium">
+                {lead.name}
+              </div>
+              <div className="text-sm">
+                ₹{" "}
+                {lead.value
+                  ? Number(lead.value).toLocaleString()
+                  : "-"}
+              </div>
+            </div>
+
+            <div className="text-sm text-zinc-400">
+              {lead.status}
+            </div>
+          </div>
         ))}
-      </section>
+      </div>
     </div>
   )
 }

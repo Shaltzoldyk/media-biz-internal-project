@@ -4,6 +4,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 
 const navItems = [
+  { name: "Today", path: "/today" },
   { name: "Dashboard", path: "/" },
   { name: "Leads", path: "/leads" },
   { name: "Pipeline", path: "/pipeline" },
@@ -14,8 +15,15 @@ const navItems = [
 export default function Sidebar() {
   const pathname = usePathname()
 
+  const isActive = (path: string) => {
+    if (path === "/") {
+      return pathname === "/"
+    }
+    return pathname.startsWith(path)
+  }
+
   return (
-    <div className="w-64 h-screen bg-zinc-900 text-white p-6">
+    <div className="w-64 h-screen bg-zinc-900 text-white p-6 border-r border-zinc-800">
       <h1 className="text-xl font-semibold mb-8">Lead OS</h1>
 
       <nav className="space-y-3">
@@ -24,7 +32,7 @@ export default function Sidebar() {
             key={item.path}
             href={item.path}
             className={`block px-3 py-2 rounded-md transition ${
-              pathname === item.path
+              isActive(item.path)
                 ? "bg-zinc-700"
                 : "hover:bg-zinc-800"
             }`}

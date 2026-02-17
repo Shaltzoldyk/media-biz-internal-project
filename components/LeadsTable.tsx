@@ -5,7 +5,6 @@ import { supabase } from "@/lib/supabase"
 import { getStageStatus } from "@/lib/stageVelocity"
 import { Lead } from "@/types/lead"
 
-
 const statusOptions = [
   "New",
   "Qualified",
@@ -16,27 +15,50 @@ const statusOptions = [
   "Lost",
 ]
 
-export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
+export default function LeadsTable({
+  initialLeads,
+}: {
+  initialLeads: Lead[]
+}) {
   const [leads, setLeads] = useState<Lead[]>(initialLeads)
 
   const updateStatus = async (id: string, newStatus: string) => {
+    if (!statusOptions.includes(newStatus)) return
+
     const timestamp = new Date().toISOString()
+
+    const updatePayload: any = {
+      status: newStatus,
+      stage_changed_at: timestamp,
+    }
+
+    if (
+      newStatus === "Contacted" ||
+      newStatus === "Responded" ||
+      newStatus === "Call Booked"
+    ) {
+      updatePayload.last_contacted_at = timestamp
+    }
 
     // Optimistic UI update
     setLeads((prev) =>
       prev.map((lead) =>
         lead.id === id
-          ? { ...lead, status: newStatus, stage_changed_at: timestamp }
+          ? {
+              ...lead,
+              status: newStatus,
+              stage_changed_at: timestamp,
+              last_contacted_at:
+                updatePayload.last_contacted_at ||
+                lead.last_contacted_at,
+            }
           : lead
       )
     )
 
     const { error } = await supabase
       .from("leads")
-      .update({
-        status: newStatus,
-        stage_changed_at: timestamp,
-      })
+      .update(updatePayload)
       .eq("id", id)
 
     if (error) {
@@ -44,8 +66,31 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
     }
   }
 
+  const updateFollowUp = async (id: string, date: string) => {
+    // Optimistic update
+    setLeads((prev) =>
+      prev.map((lead) =>
+        lead.id === id
+          ? { ...lead, follow_up_date: date }
+          : lead
+      )
+    )
+
+    const { error } = await supabase
+      .from("leads")
+      .update({ follow_up_date: date })
+      .eq("id", id)
+
+    if (error) {
+      console.error("Error updating follow-up date:", error)
+    }
+  }
+
   const deleteLead = async (id: string) => {
-    const { error } = await supabase.from("leads").delete().eq("id", id)
+    const { error } = await supabase
+      .from("leads")
+      .delete()
+      .eq("id", id)
 
     if (error) {
       console.error("Error deleting lead:", error)
@@ -75,13 +120,16 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
             <th className="p-4">Value</th>
             <th className="p-4">Score</th>
             <th className="p-4">Status</th>
+            <th className="p-4">Follow Up</th>
             <th className="p-4">Actions</th>
           </tr>
         </thead>
 
         <tbody>
           {leads.map((lead) => {
-            const velocity = getStageStatus(lead.stage_changed_at)
+            const velocity = getStageStatus(
+              lead.stage_changed_at
+            )
 
             const velocityColor =
               velocity === "green"
@@ -95,6 +143,7 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                 key={lead.id}
                 className="border-t border-zinc-800 hover:bg-zinc-800/40 transition"
               >
+                {/* Name + Velocity */}
                 <td className="p-4 font-medium flex items-center gap-2">
                   <span
                     className={`w-2 h-2 rounded-full ${velocityColor}`}
@@ -106,7 +155,9 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                   {lead.brand_name || "-"}
                 </td>
 
-                <td className="p-4">{lead.platform || "-"}</td>
+                <td className="p-4">
+                  {lead.platform || "-"}
+                </td>
 
                 <td className="p-4">
                   {lead.subscriber_count
@@ -122,8 +173,11 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                 </td>
 
                 <td className="p-4">
-                  {lead.score !== null && lead.score !== undefined ? (
-                    <span className="text-sm">🔥 {lead.score}/10</span>
+                  {lead.score !== null &&
+                  lead.score !== undefined ? (
+                    <span className="text-sm">
+                      🔥 {lead.score}/10
+                    </span>
                   ) : (
                     "-"
                   )}
@@ -133,21 +187,44 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
                   <select
                     value={lead.status}
                     onChange={(e) =>
-                      updateStatus(lead.id, e.target.value)
+                      updateStatus(
+                        lead.id,
+                        e.target.value
+                      )
                     }
                     className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1"
                   >
                     {statusOptions.map((status) => (
-                      <option key={status} value={status}>
+                      <option
+                        key={status}
+                        value={status}
+                      >
                         {status}
                       </option>
                     ))}
                   </select>
                 </td>
 
+                {/* Follow-up */}
+                <td className="p-4">
+                  <input
+                    type="date"
+                    value={lead.follow_up_date || ""}
+                    onChange={(e) =>
+                      updateFollowUp(
+                        lead.id,
+                        e.target.value
+                      )
+                    }
+                    className="bg-zinc-800 border border-zinc-700 rounded px-2 py-1"
+                  />
+                </td>
+
                 <td className="p-4">
                   <button
-                    onClick={() => deleteLead(lead.id)}
+                    onClick={() =>
+                      deleteLead(lead.id)
+                    }
                     className="text-red-400 hover:text-red-300"
                   >
                     Delete

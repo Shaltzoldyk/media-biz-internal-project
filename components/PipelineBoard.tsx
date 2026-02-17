@@ -50,21 +50,39 @@ export default function PipelineBoard({
 
     const timestamp = new Date().toISOString()
 
-    // Optimistic UI update
+    const updatePayload: any = {
+      status: newStatus,
+      stage_changed_at: timestamp,
+    }
+
+    // Auto update last_contacted_at
+    if (
+      newStatus === "Contacted" ||
+      newStatus === "Responded" ||
+      newStatus === "Call Booked"
+    ) {
+      updatePayload.last_contacted_at = timestamp
+    }
+
+    // Optimistic update
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId
-          ? { ...l, status: newStatus, stage_changed_at: timestamp }
+          ? {
+              ...l,
+              status: newStatus,
+              stage_changed_at: timestamp,
+              last_contacted_at:
+                updatePayload.last_contacted_at ||
+                l.last_contacted_at,
+            }
           : l
       )
     )
 
     await supabase
       .from("leads")
-      .update({
-        status: newStatus,
-        stage_changed_at: timestamp,
-      })
+      .update(updatePayload)
       .eq("id", leadId)
   }
 
@@ -94,7 +112,7 @@ export default function PipelineBoard({
   return (
     <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
       <div className="w-full">
-        {/* Total */}
+        {/* Global Pipeline Total */}
         <div className="mb-6 text-xl font-semibold">
           Total Pipeline: ₹ {totalPipelineValue.toLocaleString()}
         </div>
