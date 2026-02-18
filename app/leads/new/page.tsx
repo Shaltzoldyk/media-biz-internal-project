@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { calculateLeadScore } from "@/lib/leadScore"
+import { logActivity } from "@/lib/activity"
 
 export default function NewLeadPage() {
   const router = useRouter()
@@ -34,24 +35,45 @@ export default function NewLeadPage() {
       warmIntro,
     })
 
-    const { error } = await supabase.from("leads").insert([
-      {
-        name,
-        brand_name: brand || null,
-        platform,
-        subscriber_count: subscriberNumber,
-        value: dealValue,
-        score: computedScore,
-        status: "New",
-        stage_changed_at: new Date().toISOString(),
-      },
-    ])
+    const timestamp = new Date().toISOString()
 
-    if (error) {
+    const { data: insertedLead, error } = await supabase
+      .from("leads")
+      .insert([
+        {
+          name,
+          brand_name: brand || null,
+          platform,
+          subscriber_count: subscriberNumber,
+          value: dealValue,
+          score: computedScore,
+          status: "New",
+          stage_changed_at: timestamp,
+          converted: false,
+        },
+      ])
+      .select()
+      .single()
+
+    if (error || !insertedLead) {
       setErrorMessage("Failed to create lead.")
       setLoading(false)
       return
     }
+
+    // ✅ Log lifecycle creation
+    await logActivity({
+      entityType: "lead",
+      entityId: insertedLead.id,
+      type: "lead_created",
+      metadata: {
+        name: insertedLead.name,
+        platform: insertedLead.platform,
+        value: insertedLead.value,
+        score: insertedLead.score,
+        warmIntro,
+      },
+    })
 
     router.push("/leads")
     router.refresh()
@@ -65,7 +87,6 @@ export default function NewLeadPage() {
         onSubmit={handleSubmit}
         className="bg-zinc-900 text-white p-8 rounded-xl border border-zinc-800 space-y-6"
       >
-        {/* Name */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Name</label>
           <input
@@ -76,7 +97,6 @@ export default function NewLeadPage() {
           />
         </div>
 
-        {/* Brand */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Brand Name</label>
           <input
@@ -86,7 +106,6 @@ export default function NewLeadPage() {
           />
         </div>
 
-        {/* Platform */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Platform</label>
           <select
@@ -100,7 +119,6 @@ export default function NewLeadPage() {
           </select>
         </div>
 
-        {/* Subscribers */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Subscriber Count</label>
           <input
@@ -111,7 +129,6 @@ export default function NewLeadPage() {
           />
         </div>
 
-        {/* Deal Value */}
         <div className="space-y-2">
           <label className="text-sm text-zinc-400">Deal Value (₹)</label>
           <input
@@ -122,7 +139,6 @@ export default function NewLeadPage() {
           />
         </div>
 
-        {/* Warm Intro Toggle */}
         <div className="flex items-center gap-3">
           <input
             type="checkbox"
@@ -135,12 +151,10 @@ export default function NewLeadPage() {
           </label>
         </div>
 
-        {/* Error */}
         {errorMessage && (
           <div className="text-red-400 text-sm">{errorMessage}</div>
         )}
 
-        {/* Submit */}
         <div className="pt-4">
           <button
             type="submit"

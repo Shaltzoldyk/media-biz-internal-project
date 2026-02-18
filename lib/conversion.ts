@@ -1,20 +1,23 @@
-import { supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase"
+import { logActivity } from "@/lib/activity"
 
 export async function convertLeadToClient(leadId: string) {
+  // 1️⃣ Fetch Lead
   const { data: lead, error: leadError } = await supabase
     .from("leads")
     .select("*")
     .eq("id", leadId)
-    .single();
+    .single()
 
   if (leadError || !lead) {
-    throw new Error("Lead not found");
+    throw new Error("Lead not found")
   }
 
   if (lead.converted) {
-    throw new Error("Lead already converted");
+    throw new Error("Lead already converted")
   }
 
+  // 2️⃣ Create Client
   const { data: client, error: clientError } = await supabase
     .from("clients")
     .insert({
@@ -26,24 +29,52 @@ export async function convertLeadToClient(leadId: string) {
       start_date: new Date().toISOString().split("T")[0],
     })
     .select()
-    .single();
+    .single()
 
   if (clientError || !client) {
-    throw new Error(clientError?.message || "Failed to create client");
+    throw new Error(clientError?.message || "Failed to create client")
   }
+
+  // 3️⃣ Update Lead as Converted
+  const conversionTimestamp = new Date().toISOString()
 
   const { error: updateError } = await supabase
     .from("leads")
     .update({
       converted: true,
-      converted_at: new Date().toISOString(),
+      converted_at: conversionTimestamp,
       client_id: client.id,
     })
-    .eq("id", lead.id);
+    .eq("id", lead.id)
 
   if (updateError) {
-    throw new Error(updateError.message);
+    throw new Error(updateError.message)
   }
 
-  return client;
+  // 4️⃣ 🔥 ACTIVITY LOGGING (Phase 4)
+
+  // Log on lead
+  await logActivity({
+    entityType: "lead",
+    entityId: lead.id,
+    type: "conversion",
+    metadata: {
+      convertedToClientId: client.id,
+      contractValue: lead.value,
+      billingType: "monthly",
+    },
+  })
+
+  // Log on client
+  await logActivity({
+    entityType: "client",
+    entityId: client.id,
+    type: "conversion",
+    metadata: {
+      fromLeadId: lead.id,
+      originalLeadStatus: lead.status,
+    },
+  })
+
+  return client
 }

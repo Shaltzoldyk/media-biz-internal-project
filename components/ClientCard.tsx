@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { supabase } from "@/lib/supabase"
 import RevenueSection from "./RevenueSection"
+import { logActivity } from "@/lib/activity"
 
 export default function ClientCard({ client }: any) {
   const [editing, setEditing] = useState(false)
@@ -10,7 +11,10 @@ export default function ClientCard({ client }: any) {
   const [billing, setBilling] = useState(client.billing_type)
 
   const save = async () => {
-    await supabase
+    const previousValue = client.contract_value
+    const previousBilling = client.billing_type
+
+    const { error } = await supabase
       .from("clients")
       .update({
         contract_value: value,
@@ -18,12 +22,36 @@ export default function ClientCard({ client }: any) {
       })
       .eq("id", client.id)
 
+    if (error) {
+      console.error("Contract update failed:", error)
+      return
+    }
+
+    // Log only if something changed
+    if (
+      Number(previousValue) !== Number(value) ||
+      previousBilling !== billing
+    ) {
+      await logActivity({
+        entityType: "client",
+        entityId: client.id,
+        type: "contract_update",
+        metadata: {
+          previousValue,
+          newValue: value,
+          previousBilling,
+          newBilling: billing,
+        },
+      })
+    }
+
     setEditing(false)
     location.reload()
   }
 
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4">
+      {/* Header */}
       <div className="flex justify-between items-center">
         <div className="font-medium text-lg">
           {client.name}
@@ -37,6 +65,7 @@ export default function ClientCard({ client }: any) {
         </button>
       </div>
 
+      {/* Contract Section */}
       {editing ? (
         <div className="space-y-3 mt-3">
           <input
@@ -76,7 +105,7 @@ export default function ClientCard({ client }: any) {
         </>
       )}
 
-      {/* 🔥 Revenue Tracking Section */}
+      {/* Revenue Tracking Section */}
       <RevenueSection client={client} />
     </div>
   )

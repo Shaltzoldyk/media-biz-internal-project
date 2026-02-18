@@ -19,6 +19,7 @@ import { supabase } from "@/lib/supabase"
 import { Lead } from "@/types/lead"
 import { getStageStatus } from "@/lib/stageVelocity"
 import { convertLeadToClient } from "@/lib/conversion"
+import { logActivity } from "@/lib/activity" // ✅ ADDED
 
 const statuses = [
   "New",
@@ -65,7 +66,7 @@ export default function PipelineBoard({
       updatePayload.last_contacted_at = timestamp
     }
 
-    // Optimistic UI update
+    // ✅ Optimistic UI update
     setLeads((prev) =>
       prev.map((l) =>
         l.id === leadId
@@ -74,8 +75,7 @@ export default function PipelineBoard({
               status: newStatus,
               stage_changed_at: timestamp,
               last_contacted_at:
-                updatePayload.last_contacted_at ||
-                l.last_contacted_at,
+                updatePayload.last_contacted_at || l.last_contacted_at,
             }
           : l
       )
@@ -87,7 +87,7 @@ export default function PipelineBoard({
       .eq("id", leadId)
 
     if (error) {
-      // Rollback UI
+      // 🔁 Rollback UI
       setLeads((prev) =>
         prev.map((l) =>
           l.id === leadId ? { ...l, status: previousStatus } : l
@@ -96,6 +96,17 @@ export default function PipelineBoard({
       return
     }
 
+    // ✅ LOG STATUS CHANGE (Phase 4 Activity Engine)
+    await logActivity({
+      entityType: "lead",
+      entityId: leadId,
+      type: "status_change",
+      metadata: {
+        from: previousStatus,
+        to: newStatus,
+      },
+    })
+
     // 🔥 AUTO CONVERT WHEN MOVED TO CLIENT
     if (newStatus === "Client" && !lead.converted) {
       try {
@@ -103,12 +114,13 @@ export default function PipelineBoard({
       } catch (err) {
         console.error("Conversion failed:", err)
 
-        // Rollback to previous stage if conversion fails
+        // Rollback DB
         await supabase
           .from("leads")
           .update({ status: previousStatus })
           .eq("id", leadId)
 
+        // Rollback UI
         setLeads((prev) =>
           prev.map((l) =>
             l.id === leadId ? { ...l, status: previousStatus } : l

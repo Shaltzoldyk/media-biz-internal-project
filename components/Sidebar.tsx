@@ -6,9 +6,18 @@ import { usePathname } from "next/navigation"
 const navItems = [
   { name: "Today", path: "/today" },
   { name: "Dashboard", path: "/" },
+
+  // Core Acquisition
   { name: "Leads", path: "/leads" },
   { name: "Pipeline", path: "/pipeline" },
+
+  // Revenue
   { name: "Clients", path: "/clients" },
+
+  // System Memory
+  { name: "Activity", path: "/activity" },
+
+  // Analytics
   { name: "Analytics", path: "/analytics" },
 ]
 
@@ -24,7 +33,9 @@ export default function Sidebar() {
 
   return (
     <div className="w-64 h-screen bg-zinc-900 text-white p-6 border-r border-zinc-800">
-      <h1 className="text-xl font-semibold mb-8">Lead OS</h1>
+      <h1 className="text-xl font-semibold mb-8">
+        Lead OS
+      </h1>
 
       <nav className="space-y-3">
         {navItems.map((item) => (

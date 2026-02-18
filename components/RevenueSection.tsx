@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
+import { logActivity } from "@/lib/activity"
 
 function calculatePeriods(startDate: string, billing: string) {
   if (!startDate) return 0
@@ -42,11 +43,35 @@ export default function RevenueSection({ client }: { client: any }) {
   const addPayment = async () => {
     if (!amount) return
 
-    await supabase.from("revenue_records").insert({
-      client_id: client.id,
-      amount: Number(amount),
-      revenue_date: new Date().toISOString().split("T")[0],
-      type: "payment",
+    const paymentAmount = Number(amount)
+    const revenueDate = new Date().toISOString().split("T")[0]
+
+    const { data, error } = await supabase
+      .from("revenue_records")
+      .insert({
+        client_id: client.id,
+        amount: paymentAmount,
+        revenue_date: revenueDate,
+        type: "payment",
+      })
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Error adding payment:", error)
+      return
+    }
+
+    // ✅ Log payment activity
+    await logActivity({
+      entityType: "client",
+      entityId: client.id,
+      type: "payment_logged",
+      metadata: {
+        paymentId: data.id,
+        amount: paymentAmount,
+        revenueDate,
+      },
     })
 
     setAmount("")
@@ -54,10 +79,30 @@ export default function RevenueSection({ client }: { client: any }) {
   }
 
   const deletePayment = async (id: string) => {
-    await supabase
+    const record = records.find((r) => r.id === id)
+    if (!record) return
+
+    const { error } = await supabase
       .from("revenue_records")
       .delete()
       .eq("id", id)
+
+    if (error) {
+      console.error("Error deleting payment:", error)
+      return
+    }
+
+    // ✅ Log deletion activity
+    await logActivity({
+      entityType: "client",
+      entityId: client.id,
+      type: "payment_deleted",
+      metadata: {
+        paymentId: id,
+        amount: record.amount,
+        revenueDate: record.revenue_date,
+      },
+    })
 
     fetchRecords()
   }

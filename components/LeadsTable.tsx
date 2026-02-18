@@ -1,9 +1,11 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 import { getStageStatus } from "@/lib/stageVelocity"
 import { Lead } from "@/types/lead"
+import { logActivity } from "@/lib/activity"
 
 const statusOptions = [
   "New",
@@ -25,6 +27,10 @@ export default function LeadsTable({
   const updateStatus = async (id: string, newStatus: string) => {
     if (!statusOptions.includes(newStatus)) return
 
+    const lead = leads.find((l) => l.id === id)
+    if (!lead || lead.status === newStatus) return
+
+    const previousStatus = lead.status
     const timestamp = new Date().toISOString()
 
     const updatePayload: any = {
@@ -63,11 +69,35 @@ export default function LeadsTable({
 
     if (error) {
       console.error("Error updating status:", error)
+
+      // Rollback
+      setLeads((prev) =>
+        prev.map((lead) =>
+          lead.id === id
+            ? { ...lead, status: previousStatus }
+            : lead
+        )
+      )
+      return
     }
+
+    await logActivity({
+      entityType: "lead",
+      entityId: id,
+      type: "status_change",
+      metadata: {
+        from: previousStatus,
+        to: newStatus,
+      },
+    })
   }
 
   const updateFollowUp = async (id: string, date: string) => {
-    // Optimistic update
+    const lead = leads.find((l) => l.id === id)
+    if (!lead) return
+
+    const previousDate = lead.follow_up_date
+
     setLeads((prev) =>
       prev.map((lead) =>
         lead.id === id
@@ -83,10 +113,32 @@ export default function LeadsTable({
 
     if (error) {
       console.error("Error updating follow-up date:", error)
+
+      setLeads((prev) =>
+        prev.map((lead) =>
+          lead.id === id
+            ? { ...lead, follow_up_date: previousDate }
+            : lead
+        )
+      )
+      return
     }
+
+    await logActivity({
+      entityType: "lead",
+      entityId: id,
+      type: "follow_up",
+      metadata: {
+        previousFollowUpDate: previousDate,
+        newFollowUpDate: date,
+      },
+    })
   }
 
   const deleteLead = async (id: string) => {
+    const lead = leads.find((l) => l.id === id)
+    if (!lead) return
+
     const { error } = await supabase
       .from("leads")
       .delete()
@@ -97,7 +149,20 @@ export default function LeadsTable({
       return
     }
 
-    setLeads((prev) => prev.filter((lead) => lead.id !== id))
+    setLeads((prev) =>
+      prev.filter((lead) => lead.id !== id)
+    )
+
+    await logActivity({
+      entityType: "lead",
+      entityId: id,
+      type: "note",
+      metadata: {
+        action: "lead_deleted",
+        name: lead.name,
+        finalStatus: lead.status,
+      },
+    })
   }
 
   if (!leads.length) {
@@ -143,12 +208,17 @@ export default function LeadsTable({
                 key={lead.id}
                 className="border-t border-zinc-800 hover:bg-zinc-800/40 transition"
               >
-                {/* Name + Velocity */}
+                {/* Name + Velocity + Link */}
                 <td className="p-4 font-medium flex items-center gap-2">
                   <span
                     className={`w-2 h-2 rounded-full ${velocityColor}`}
                   />
-                  {lead.name}
+                  <Link
+                    href={`/leads/${lead.id}`}
+                    className="hover:underline"
+                  >
+                    {lead.name}
+                  </Link>
                 </td>
 
                 <td className="p-4 text-zinc-400">
@@ -205,7 +275,6 @@ export default function LeadsTable({
                   </select>
                 </td>
 
-                {/* Follow-up */}
                 <td className="p-4">
                   <input
                     type="date"
