@@ -9,6 +9,7 @@ import {
 } from "./intelligence"
 import { Lead } from "@/types/lead"
 import { logActivity } from "./activity"
+import { runAutomationCycle } from "./automationEngine"
 
 /* ================================
    SEVERITY RANKING
@@ -31,6 +32,9 @@ export async function runIntelligenceChecks() {
   await runStuckLeadCheck()
   await runClientRiskCheck()
   await runSystemHealthSnapshot()
+
+  // 🚀 Phase 5 Automation Layer
+  await runAutomationCycle()
 }
 
 /* ================================
@@ -44,10 +48,7 @@ async function runStuckLeadCheck() {
 
   const leads = (data || []) as Lead[]
 
-  const stuckLeads = detectStuckLeads(
-    leads,
-    5
-  )
+  const stuckLeads = detectStuckLeads(leads, 5)
 
   for (const lead of stuckLeads) {
     const { data: existing } =
@@ -90,8 +91,7 @@ async function runStuckLeadCheck() {
         severity: lead.severity,
         metadata: {
           stage: lead.stage,
-          daysInStage:
-            lead.daysInStage,
+          daysInStage: lead.daysInStage,
         },
       })
     }
@@ -162,8 +162,7 @@ async function runClientRiskCheck() {
         message: `Client payment overdue (${client.daysOverdue} days)`,
         severity: client.severity,
         metadata: {
-          daysOverdue:
-            client.daysOverdue,
+          daysOverdue: client.daysOverdue,
         },
       })
     }
