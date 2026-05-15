@@ -3,7 +3,7 @@
 > A purpose-built CRM for a creator-led media business: replacing generic tools with something designed around how sponsorship pipelines, recurring client revenue, and brand outreach actually work.
 
 **Status:** Work in progress · In active use  
-**Philosophy:** Small software — purpose-built tools for small teams outperform generic platforms when the workflow is specific enough to justify it.
+**Philosophy:** Small software: purpose-built tools for small teams outperform generic platforms when the workflow is specific enough to justify it.
 
 ---
 
@@ -11,7 +11,7 @@
 
 Off-the-shelf CRMs are built for sales teams. They assume a generic B2B pipeline: lead → demo → proposal → close. A media business running brand partnerships and recurring post-production clients doesn't map cleanly onto that. The stages are different, the signals that matter are different, and the revenue model (a mix of one-off sponsorships and monthly retainers) requires different alerting logic entirely.
 
-This is a CRM built around the actual workflow — not adapted to fit one.
+This is a CRM built around the actual workflow, not adapted to fit one.
 
 ---
 
