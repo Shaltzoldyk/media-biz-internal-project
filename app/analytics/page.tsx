@@ -3,6 +3,8 @@ import { calculatePredictivePipeline } from "@/lib/predictiveLeadEngine"
 import { calculateLeadAgingDistribution } from "@/lib/leadAgingEngine"
 import { runMonteCarloForecast } from "@/lib/monteCarloForecastEngine"
 
+export const dynamic = "force-dynamic"
+
 export default async function AnalyticsPage() {
   const forecast = await calculateRevenueForecast()
   const pipeline = await calculatePredictivePipeline()

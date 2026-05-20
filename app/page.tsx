@@ -1,7 +1,10 @@
-import { runIntelligenceChecks } from "@/lib/intelligenceRunner"
 import { calculatePipelineHealth } from "@/lib/pipelineHealthEngine"
-import { runPipelineHealthSnapshot } from "@/lib/pipelineHealthSnapshotEngine"
 import { supabase } from "@/lib/supabase"
+
+// Prevent Next.js from pre-rendering at build time — all data is live Supabase.
+// Intelligence checks are no longer triggered here; use /api/intelligence/run
+// (called via cron or manually during dev).
+export const dynamic = "force-dynamic"
 
 const severityOrder: Record<string, number> = {
   critical: 3,
@@ -10,8 +13,6 @@ const severityOrder: Record<string, number> = {
 }
 
 export default async function Dashboard() {
-  await runIntelligenceChecks()
-  await runPipelineHealthSnapshot()
 
   // ===============================
   // Alerts

@@ -6,11 +6,11 @@ import {
   detectAtRiskClients,
   calculateSystemHealth,
 } from "@/lib/intelligence"
-import { runIntelligenceChecks } from "@/lib/intelligenceRunner"
+
+// Live data — do not pre-render at build time.
+export const dynamic = "force-dynamic"
 
 export default async function TodayPage() {
-  await runIntelligenceChecks()
-
   const todayStr = new Date()
     .toISOString()
     .split("T")[0]

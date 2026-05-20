@@ -23,32 +23,35 @@ export async function calculatePredictivePipeline() {
      ========================================== */
 
   const stageTotals: Record<string, number> = {}
-  const stageWins: Record<string, number> = {}
+  let totalConverted = 0
+  let totalActive = 0
 
   for (const lead of leads) {
     const stage = lead.status
     if (!stage) continue
-    if (stage === "Client" || stage === "Lost")
-      continue
 
-    stageTotals[stage] =
-      (stageTotals[stage] || 0) + 1
-
-    if (lead.status === "Client") {
-      stageWins[stage] =
-        (stageWins[stage] || 0) + 1
+    if (stage !== "Client" && stage !== "Lost") {
+      stageTotals[stage] = (stageTotals[stage] || 0) + 1
+      totalActive++
     }
+
+    if (lead.converted === true) totalConverted++
   }
 
   const stageProbabilities: Record<string, number> = {}
 
   for (const stage in stageTotals) {
     const total = stageTotals[stage]
-    const wins = stageWins[stage] || 0
+
+    // Proportional win attribution with Bayesian smoothing
+    const stageWins =
+      totalActive > 0
+        ? totalConverted * (total / totalActive)
+        : 0
 
     // Bayesian smoothing prevents 0% collapse
     stageProbabilities[stage] =
-      (wins + SMOOTHING_FACTOR) /
+      (stageWins + SMOOTHING_FACTOR) /
       (total + SMOOTHING_FACTOR * 2)
   }
 

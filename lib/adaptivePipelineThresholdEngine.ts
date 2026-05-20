@@ -10,19 +10,17 @@ export async function getAdaptiveStageThreshold() {
   }
 
   const stageTotals: Record<string, number> = {}
-  const stageConversions: Record<string, number> = {}
+  let totalConverted = 0
+  let totalActive = 0
 
   for (const lead of leads) {
     const stage = lead.status
     if (!stage) continue
 
-    stageTotals[stage] =
-      (stageTotals[stage] || 0) + 1
+    stageTotals[stage] = (stageTotals[stage] || 0) + 1
 
-    if (lead.status === "Client") {
-      stageConversions[stage] =
-        (stageConversions[stage] || 0) + 1
-    }
+    if (lead.converted === true) totalConverted++
+    if (stage !== "Client" && stage !== "Lost") totalActive++
   }
 
   const stageRates: number[] = []
@@ -31,12 +29,15 @@ export async function getAdaptiveStageThreshold() {
     if (stage === "Client" || stage === "Lost") continue
 
     const total = stageTotals[stage]
-    const conversions =
-      stageConversions[stage] || 0
+    if (total === 0) continue
 
-    if (total > 0) {
-      stageRates.push(conversions / total)
-    }
+    // Proportional win attribution — same model as automationEngine
+    const stageWins =
+      totalActive > 0
+        ? totalConverted * (total / totalActive)
+        : 0
+
+    stageRates.push(stageWins / total)
   }
 
   if (stageRates.length === 0) return 0.15

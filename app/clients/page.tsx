@@ -40,12 +40,34 @@ export default async function ClientsPage() {
         ?.filter((r) => r.client_id === client.id)
         .reduce((s, r) => s + Number(r.amount || 0), 0) || 0
 
-    const expected =
-      client.billing_type === "one_time"
-        ? Number(client.contract_value || 0)
-        : Number(client.contract_value || 0)
+    const contractValue = Number(client.contract_value || 0)
 
-    return sum + (expected - clientRevenue)
+    let expected = 0
+
+    if (client.billing_type === "one_time") {
+      expected = contractValue
+    } else if (client.start_date) {
+      const start = new Date(client.start_date)
+      const now = new Date()
+      const diffMs = now.getTime() - start.getTime()
+      const diffDays = diffMs / (1000 * 60 * 60 * 24)
+
+      let periods = 0
+      if (client.billing_type === "weekly") periods = Math.floor(diffDays / 7)
+      else if (client.billing_type === "bi_weekly") periods = Math.floor(diffDays / 14)
+      else if (client.billing_type === "monthly") {
+        // Use calendar months for accuracy
+        periods =
+          (now.getFullYear() - start.getFullYear()) * 12 +
+          (now.getMonth() - start.getMonth())
+      }
+
+      expected = Math.max(1, periods) * contractValue
+    }
+
+    const outstanding = expected - clientRevenue
+    // Only count positive outstanding (negative = overpaid, ignore in total)
+    return sum + Math.max(0, outstanding)
   }, 0)
 
   const averageRevenuePerClient =

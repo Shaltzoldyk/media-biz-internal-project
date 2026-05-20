@@ -179,16 +179,46 @@ async function handleStageBottlenecks() {
   const stageTotals: Record<string, number> = {}
   const stageConversions: Record<string, number> = {}
 
+  // Count every lead's current stage toward stageTotals.
+  // A converted lead (converted === true) is a win — we credit
+  // the conversion to the stage it currently sits in (or "Client").
+  // To attribute wins back to earlier stages we use the total
+  // conversion count as a pool: each non-terminal stage's win rate
+  // is estimated as (total converted leads) / (total non-terminal leads).
+  // This is conservative but honest given we have no stage-history table.
+
+  let totalConverted = 0
+  let totalActive = 0
+
   for (const lead of leads) {
     const stage = lead.status
     if (!stage) continue
 
-    stageTotals[stage] =
-      (stageTotals[stage] || 0) + 1
+    stageTotals[stage] = (stageTotals[stage] || 0) + 1
 
-    if (lead.status === "Client") {
+    if (lead.converted === true) {
+      totalConverted++
+    }
+
+    if (stage !== "Client" && stage !== "Lost") {
+      totalActive++
+    }
+  }
+
+  // Distribute wins proportionally across non-terminal stages
+  // (equal share per stage is the least-biased estimate without history)
+  const nonTerminalStages = Object.keys(stageTotals).filter(
+    (s) => s !== "Client" && s !== "Lost"
+  )
+
+  for (const stage of nonTerminalStages) {
+    const stageTotal = stageTotals[stage]
+    if (totalActive === 0) {
+      stageConversions[stage] = 0
+    } else {
+      // Stage's share of total wins, weighted by its proportion of active leads
       stageConversions[stage] =
-        (stageConversions[stage] || 0) + 1
+        totalConverted * (stageTotal / totalActive)
     }
   }
 

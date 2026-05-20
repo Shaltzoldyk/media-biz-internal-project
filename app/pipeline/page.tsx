@@ -1,6 +1,8 @@
 import { supabase } from "@/lib/supabase"
 import PipelineBoardWrapper from "@/components/PipelineBoardWrapper"
 
+export const dynamic = "force-dynamic"
+
 export default async function PipelinePage() {
   const { data: leads, error } = await supabase
     .from("leads")
