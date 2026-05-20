@@ -1,6 +1,8 @@
 import { supabase } from "@/lib/supabase"
 import ClientCard from "@/components/ClientCard"
 
+export const dynamic = "force-dynamic"
+
 export default async function ClientsPage() {
   const { data: clients, error } = await supabase
     .from("clients")
