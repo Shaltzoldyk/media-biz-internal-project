@@ -1,399 +1,135 @@
 import { supabase } from "@/lib/supabase"
 import { Lead } from "@/types/lead"
 import {
-  detectStuckLeads,
-  detectOverdueFollowUps,
-  detectAtRiskClients,
-  calculateSystemHealth,
+  detectStuckLeads, detectOverdueFollowUps,
+  detectAtRiskClients, calculateSystemHealth,
 } from "@/lib/intelligence"
+import { getExchangeRate, fmtINR, fmtUSD } from "@/lib/currency"
+import Link from "next/link"
 
-// Live data — do not pre-render at build time.
 export const dynamic = "force-dynamic"
 
 export default async function TodayPage() {
-  const todayStr = new Date()
-    .toISOString()
-    .split("T")[0]
+  const todayStr = new Date().toISOString().split("T")[0]
+  const rate = await getExchangeRate()
 
-  const { data: leadsData } =
-    await supabase.from("leads").select("*")
+  const [{ data: ld }, { data: cd }, { data: rd }, { data: snaps }] = await Promise.all([
+    supabase.from("leads").select("*"),
+    supabase.from("clients").select("*"),
+    supabase.from("revenue_records").select("*"),
+    supabase.from("system_health_snapshots").select("*").order("snapshot_date", { ascending: true }).limit(7),
+  ])
 
-  const { data: clientsData } =
-    await supabase.from("clients").select("*")
+  const leads = (ld || []) as Lead[]
+  const stuck       = detectStuckLeads(leads, 5)
+  const overdue     = detectOverdueFollowUps(leads)
+  const atRisk      = detectAtRiskClients(cd || [], rd || [])
+  const health      = calculateSystemHealth(stuck, overdue, atRisk)
+  const dueToday    = leads.filter((l) => l.follow_up_date === todayStr)
+  const hot         = leads.filter((l) => (l.score || 0) >= 7 && l.status === "New")
+  const totalAlerts = stuck.length + overdue.length + atRisk.length
 
-  const { data: revenueData } =
-    await supabase
-      .from("revenue_records")
-      .select("*")
-
-  const { data: snapshots } =
-    await supabase
-      .from("system_health_snapshots")
-      .select("*")
-      .order("snapshot_date", {
-        ascending: true,
-      })
-      .limit(7)
-
-  const leads =
-    (leadsData || []) as Lead[]
-
-  const stuckLeads =
-    detectStuckLeads(leads, 5)
-
-  const overdueFollowUps =
-    detectOverdueFollowUps(leads)
-
-  const atRiskClients =
-    detectAtRiskClients(
-      clientsData || [],
-      revenueData || []
-    )
-
-  const systemHealth =
-    calculateSystemHealth(
-      stuckLeads,
-      overdueFollowUps,
-      atRiskClients
-    )
-
-  const previousScore =
-    snapshots && snapshots.length > 1
-      ? snapshots[snapshots.length - 2]
-          ?.score
-      : null
-
-  const dueToday = leads.filter(
-    (lead) =>
-      lead.follow_up_date === todayStr
-  )
-
-  const highPriority = leads.filter(
-    (lead) =>
-      (lead.score || 0) >= 7 &&
-      lead.status === "New"
-  )
+  const scoreColor = health.score >= 75 ? "var(--green)" : health.score >= 50 ? "var(--amber)" : "var(--red)"
 
   return (
-    <div className="space-y-12">
-      <h1 className="text-3xl font-semibold">
-        Today
-      </h1>
+    <div>
+      <div className="page-header fade-up">
+        <div className="label">
+          {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}
+        </div>
+        <h1>Today</h1>
+      </div>
 
-      <SystemHealthCard
-        score={systemHealth.score}
-        breakdown={systemHealth.breakdown}
-        previousScore={previousScore}
-        snapshots={snapshots || []}
-      />
+      {/* Stats */}
+      <div className="fade-up delay-1" style={{
+        display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 28,
+      }}>
+        {[
+          { label: "Health score", val: health.score, color: scoreColor },
+          { label: "Due today",    val: dueToday.length, color: dueToday.length > 0 ? "var(--amber)" : "var(--text)" },
+          { label: "Hot leads",    val: hot.length, color: hot.length > 0 ? "var(--amber)" : "var(--text)" },
+          { label: "Alerts",       val: totalAlerts, color: totalAlerts > 0 ? "var(--red)" : "var(--green)" },
+        ].map((s) => (
+          <div key={s.label} className="card stat">
+            <div className="label">{s.label}</div>
+            <div className="val" style={{ color: s.color }}>{s.val}</div>
+          </div>
+        ))}
+      </div>
 
-      <ClientRiskSection
-        title="💰 At-Risk Clients"
-        clients={atRiskClients}
-      />
+      {/* Feed grid */}
+      <div className="fade-up delay-2" style={{
+        display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14,
+      }}>
+        <Feed label="Due today" empty="Nothing due today." items={dueToday.map((l) => ({
+          id: l.id, href: `/leads/${l.id}`, title: l.name, sub: l.status,
+          right: l.value ? `${fmtINR(l.value)}  ·  ${fmtUSD(l.value, rate)}` : null,
+          dot: "dot-amber",
+        }))} />
 
-      <OverdueSection
-        title="🔴 Overdue Follow Ups"
-        items={overdueFollowUps}
-      />
+        <Feed label="High priority (score ≥ 7)" empty="No high-priority new leads." items={hot.map((l) => ({
+          id: l.id, href: `/leads/${l.id}`, title: l.name, sub: `score ${l.score}/10`,
+          right: l.value ? `${fmtINR(l.value)}  ·  ${fmtUSD(l.value, rate)}` : null,
+          dot: "dot-green",
+        }))} />
 
-      <Section title="📅 Follow Ups Today">
-        {dueToday}
-      </Section>
+        <Feed label="Stuck leads" empty="No stuck leads." items={stuck.map((l: any) => ({
+          id: l.leadId, href: `/leads/${l.leadId}`, title: l.name,
+          sub: `${l.daysInStage}d in ${l.stage}`,
+          right: l.severity,
+          dot: l.severity === "critical" ? "dot-red" : "dot-amber",
+        }))} />
 
-      <StuckSection
-        title="🔥 Stuck Leads (5+ days)"
-        stuck={stuckLeads}
-      />
+        <Feed label="Overdue follow-ups" empty="No overdue follow-ups." items={overdue.map((l: any) => ({
+          id: l.leadId, href: `/leads/${l.leadId}`, title: l.name, sub: l.stage,
+          right: `${l.overdueDays}d overdue`,
+          dot: "dot-red",
+        }))} />
 
-      <Section title="🚀 High Priority (Score 7+)">
-        {highPriority}
-      </Section>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <Feed label="At-risk clients" empty="No at-risk clients." items={atRisk.map((c: any) => ({
+            id: c.clientId, href: `/clients/${c.clientId}`, title: c.name,
+            sub: `${c.daysOverdue}d overdue`,
+            right: c.severity,
+            dot: c.severity === "critical" ? "dot-red" : "dot-amber",
+          }))} />
+        </div>
+      </div>
     </div>
   )
 }
 
-/* ================================
-   SYSTEM HEALTH CARD + TREND
-================================ */
-
-function SystemHealthCard({
-  score,
-  breakdown,
-  previousScore,
-  snapshots,
-}: {
-  score: number
-  breakdown: {
-    stuckPenalty: number
-    overduePenalty: number
-    revenuePenalty: number
-  }
-  previousScore: number | null
-  snapshots: any[]
+function Feed({ label, items, empty }: {
+  label: string
+  empty: string
+  items: { id: string; href: string; title: string; sub: string; right: string | null; dot: string }[]
 }) {
-  const getColor = () => {
-    if (score >= 90)
-      return "bg-green-950 border-green-800 text-green-400"
-    if (score >= 70)
-      return "bg-yellow-950 border-yellow-800 text-yellow-400"
-    return "bg-red-950 border-red-800 text-red-400"
-  }
-
-  const getTrend = () => {
-    if (previousScore === null)
-      return null
-    if (score > previousScore)
-      return "↑ Improving"
-    if (score < previousScore)
-      return "↓ Declining"
-    return "→ Stable"
-  }
-
-  return (
-    <div
-      className={`border p-6 rounded-xl ${getColor()}`}
-    >
-      <div className="flex justify-between items-center">
-        <div>
-          <div className="text-sm uppercase tracking-wide">
-            System Health
-          </div>
-          <div className="text-4xl font-bold mt-2">
-            {score}/100
-          </div>
-          {getTrend() && (
-            <div className="text-sm mt-2">
-              {getTrend()}
-            </div>
-          )}
-        </div>
-
-        <div className="text-sm text-zinc-300 space-y-1">
-          <div>
-            Pipeline Risk:{" "}
-            {breakdown.stuckPenalty}
-          </div>
-          <div>
-            Follow-up Risk:{" "}
-            {breakdown.overduePenalty}
-          </div>
-          <div>
-            Revenue Risk:{" "}
-            {breakdown.revenuePenalty}
-          </div>
-        </div>
-      </div>
-
-      {/* Mini 7-day bar strip */}
-      {snapshots.length > 0 && (
-        <div className="flex gap-2 mt-6 items-end">
-          {snapshots.map(
-            (snap, idx) => (
-              <div
-                key={idx}
-                className="flex-1 bg-zinc-800 rounded"
-                style={{
-                  height: `${
-                    snap.score
-                  }%`,
-                  minHeight: "10px",
-                }}
-              />
-            )
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* Remaining sections unchanged */
-
-function ClientRiskSection({
-  title,
-  clients,
-}: any) {
-  if (!clients.length)
-    return <EmptyState title={title} />
-
-  const getStyles = (s: string) =>
-    s === "critical"
-      ? "bg-red-950 border-red-800 text-red-400"
-      : s === "high"
-      ? "bg-yellow-950 border-yellow-800 text-yellow-400"
-      : "bg-orange-950 border-orange-800 text-orange-400"
-
   return (
     <div>
-      <h2 className="text-xl font-semibold mb-4">
-        {title}
-      </h2>
-      <div className="grid gap-3">
-        {clients.map((c: any) => (
-          <div
-            key={c.clientId}
-            className={`border p-4 rounded-lg ${getStyles(
-              c.severity
-            )}`}
-          >
-            <div className="flex justify-between">
-              <div className="font-medium text-white">
-                {c.name}
+      <div className="label" style={{ marginBottom: 8 }}>{label}</div>
+      <div className="card" style={{ overflow: "hidden" }}>
+        {items.length === 0 ? (
+          <div style={{ padding: "16px 16px", color: "var(--text-3)", fontSize: "0.83rem" }}>{empty}</div>
+        ) : items.map((item, i) => (
+          <Link key={item.id} href={item.href} style={{
+            display: "flex", alignItems: "center", gap: 10,
+            padding: "10px 14px",
+            borderTop: i > 0 ? "1px solid var(--border)" : "none",
+          }}>
+            <span className={`dot ${item.dot}`} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 500, fontSize: "0.875rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {item.title}
               </div>
-              <div className="text-sm">
-                {c.daysOverdue} days overdue
-              </div>
+              <div style={{ fontSize: "0.72rem", color: "var(--text-3)", marginTop: 1 }}>{item.sub}</div>
             </div>
-          </div>
+            {item.right && (
+              <span className="mono" style={{ fontSize: "0.72rem", color: "var(--text-3)", flexShrink: 0 }}>
+                {item.right}
+              </span>
+            )}
+          </Link>
         ))}
-      </div>
-    </div>
-  )
-}
-
-function Section({
-  title,
-  children,
-}: any) {
-  if (!children.length)
-    return <EmptyState title={title} />
-
-  return (
-    <div>
-      <h2 className="text-xl font-semibold mb-4">
-        {title}
-      </h2>
-      <div className="grid gap-3">
-        {children.map((lead: any) => (
-          <LeadCard
-            key={lead.id}
-            name={lead.name}
-            stage={lead.status}
-            value={lead.value}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function OverdueSection({
-  title,
-  items,
-}: any) {
-  if (!items.length)
-    return <EmptyState title={title} />
-
-  return (
-    <div>
-      <h2 className="text-xl font-semibold mb-4">
-        {title}
-      </h2>
-      <div className="grid gap-3">
-        {items.map((l: any) => (
-          <div
-            key={l.leadId}
-            className="bg-red-950 border border-red-800 p-4 rounded-lg"
-          >
-            <div className="flex justify-between">
-              <div className="font-medium">
-                {l.name}
-              </div>
-              <div className="text-sm text-red-400">
-                {l.overdueDays} days overdue
-              </div>
-            </div>
-            <div className="text-sm text-zinc-400">
-              {l.stage}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function StuckSection({
-  title,
-  stuck,
-}: any) {
-  if (!stuck.length)
-    return <EmptyState title={title} />
-
-  const getStyles = (s: string) =>
-    s === "critical"
-      ? "bg-red-950 border-red-800 text-red-400"
-      : s === "high"
-      ? "bg-yellow-950 border-yellow-800 text-yellow-400"
-      : "bg-orange-950 border-orange-800 text-orange-400"
-
-  return (
-    <div>
-      <h2 className="text-xl font-semibold mb-4">
-        {title}
-      </h2>
-      <div className="grid gap-3">
-        {stuck.map((l: any) => (
-          <div
-            key={l.leadId}
-            className={`border p-4 rounded-lg ${getStyles(
-              l.severity
-            )}`}
-          >
-            <div className="flex justify-between">
-              <div className="font-medium text-white">
-                {l.name}
-              </div>
-              <div className="text-sm">
-                {l.daysInStage} days in stage
-              </div>
-            </div>
-            <div className="text-sm text-zinc-400">
-              {l.stage}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-function LeadCard({
-  name,
-  stage,
-  value,
-}: any) {
-  return (
-    <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg">
-      <div className="flex justify-between">
-        <div className="font-medium">
-          {name}
-        </div>
-        <div className="text-sm">
-          ₹{" "}
-          {value
-            ? Number(value).toLocaleString()
-            : "-"}
-        </div>
-      </div>
-      <div className="text-sm text-zinc-400">
-        {stage}
-      </div>
-    </div>
-  )
-}
-
-function EmptyState({
-  title,
-}: any) {
-  return (
-    <div>
-      <h2 className="text-xl font-semibold mb-4">
-        {title}
-      </h2>
-      <div className="text-zinc-500">
-        Nothing here.
       </div>
     </div>
   )

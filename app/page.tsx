@@ -1,187 +1,113 @@
 import { calculatePipelineHealth } from "@/lib/pipelineHealthEngine"
 import { supabase } from "@/lib/supabase"
+import { getExchangeRate, fmtINR, fmtUSD } from "@/lib/currency"
 
-// Prevent Next.js from pre-rendering at build time — all data is live Supabase.
-// Intelligence checks are no longer triggered here; use /api/intelligence/run
-// (called via cron or manually during dev).
 export const dynamic = "force-dynamic"
 
-const severityOrder: Record<string, number> = {
-  critical: 3,
-  high: 2,
-  warning: 1,
-}
+const sev: Record<string, number> = { critical: 3, high: 2, warning: 1 }
 
 export default async function Dashboard() {
+  const rate = await getExchangeRate()
 
-  // ===============================
-  // Alerts
-  // ===============================
+  const [{ data: automations }, { data: healthSnap }, pipelineHealth, { data: phSnapshots }] =
+    await Promise.all([
+      supabase.from("automations_log").select("*").eq("resolved", false),
+      supabase.from("system_health_snapshots").select("*").order("snapshot_date", { ascending: false }).limit(1).maybeSingle(),
+      calculatePipelineHealth(),
+      supabase.from("pipeline_health_snapshots").select("*").order("snapshot_date", { ascending: false }).limit(7),
+    ])
 
-  const { data: openAutomations } = await supabase
-    .from("automations_log")
-    .select("*")
-    .eq("resolved", false)
-
-  const alerts = openAutomations || []
-
-  const sortedAlerts = alerts
-    .sort(
-      (a, b) =>
-        severityOrder[b.severity] -
-        severityOrder[a.severity]
-    )
+  const alerts = (automations || [])
+    .sort((a, b) => sev[b.severity] - sev[a.severity])
     .slice(0, 5)
 
-  const alertCount = alerts.length
+  const healthScore = healthSnap?.score ?? null
 
-  // ===============================
-  // System Health
-  // ===============================
-
-  const { data: latestHealth } = await supabase
-    .from("system_health_snapshots")
-    .select("*")
-    .order("snapshot_date", {
-      ascending: false,
-    })
-    .limit(1)
-    .maybeSingle()
-
-  const healthScore =
-    latestHealth?.score ?? "N/A"
-
-  // ===============================
-  // Pipeline Health
-  // ===============================
-
-  const pipelineHealth =
-    await calculatePipelineHealth()
-
-  // Fetch last 7 pipeline health snapshots
-  const { data: recentPipelineHealth } = await supabase
-    .from("pipeline_health_snapshots")
-    .select("*")
-    .order("snapshot_date", {
-      ascending: false,
-    })
-    .limit(7)
-
-  let trendDirection = "stable"
-
-  if (
-    recentPipelineHealth &&
-    recentPipelineHealth.length >= 2
-  ) {
-    const newest =
-      recentPipelineHealth[0].score
-
-    const oldest =
-      recentPipelineHealth[
-        recentPipelineHealth.length - 1
-      ].score
-
-    if (newest > oldest + 5) {
-      trendDirection = "improving"
-    } else if (newest < oldest - 5) {
-      trendDirection = "declining"
-    }
+  let trend = "stable"
+  if (phSnapshots && phSnapshots.length >= 2) {
+    const diff = phSnapshots[0].score - phSnapshots[phSnapshots.length - 1].score
+    if (diff > 5) trend = "improving"
+    else if (diff < -5) trend = "declining"
   }
+
+  const scoreColor = (s: number | null) =>
+    s == null ? "var(--text-3)" : s >= 75 ? "var(--green)" : s >= 50 ? "var(--amber)" : "var(--red)"
+
+  const sevPill = (s: string) =>
+    s === "critical" ? "pill pill-red" : s === "high" ? "pill pill-amber" : "pill pill-blue"
+
+  const trendColor = trend === "improving" ? "var(--green)" : trend === "declining" ? "var(--red)" : "var(--text-3)"
 
   return (
     <div>
-      <h1 className="text-3xl font-semibold mb-8">
-        Dashboard
-      </h1>
+      <div className="page-header fade-up">
+        <div className="label">overview</div>
+        <h1>Dashboard</h1>
+        <p style={{ color: "var(--text-2)", marginTop: 6, fontSize: "0.875rem" }}>
+          Operational snapshot of your revenue system.
+        </p>
+      </div>
 
-      <p className="text-zinc-600 mb-10">
-        Operational overview of your revenue system.
-      </p>
+      {/* Score cards */}
+      <div className="fade-up delay-1" style={{
+        display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 28,
+      }}>
+        <div className="card stat">
+          <div className="label">System health</div>
+          <div className="val" style={{ color: scoreColor(healthScore) }}>
+            {healthScore ?? "—"}
+          </div>
+          <div className="sub">composite score</div>
+        </div>
 
-      {/* ================= Alerts Overview ================= */}
-      <div className="p-6 bg-zinc-900 rounded-xl border border-zinc-800 mb-8">
-        <h2 className="text-xl font-semibold mb-4">
-          Active Alerts ({alertCount})
-        </h2>
+        <div className="card stat">
+          <div className="label">Pipeline health</div>
+          <div className="val" style={{ color: scoreColor(pipelineHealth.score) }}>
+            {pipelineHealth.score}
+          </div>
+          <div className="sub" style={{ color: trendColor }}>{trend}</div>
+        </div>
 
-        {sortedAlerts.length === 0 && (
-          <p className="text-zinc-400">
-            No active alerts.
-          </p>
-        )}
-
-        <div className="space-y-4">
-          {sortedAlerts.map((alert) => (
-            <div
-              key={alert.id}
-              className="p-4 bg-zinc-800 rounded-lg border border-zinc-700"
-            >
-              <p className="text-sm text-zinc-400">
-                {alert.type}
-              </p>
-
-              <p
-                className={`font-semibold ${
-                  alert.severity === "critical"
-                    ? "text-red-500"
-                    : alert.severity === "high"
-                    ? "text-orange-400"
-                    : "text-yellow-400"
-                }`}
-              >
-                {alert.severity.toUpperCase()}
-              </p>
-
-              <p className="text-xs text-zinc-500 mt-1">
-                {new Date(
-                  alert.created_at
-                ).toLocaleString()}
-              </p>
-            </div>
-          ))}
+        <div className="card stat">
+          <div className="label">Active alerts</div>
+          <div className="val" style={{ color: alerts.length > 0 ? "var(--red)" : "var(--green)" }}>
+            {alerts.length}
+          </div>
+          <div className="sub">{alerts.length === 0 ? "all clear" : "need attention"}</div>
         </div>
       </div>
 
-      {/* ================= System Health ================= */}
-      <div className="p-6 bg-zinc-900 rounded-xl border border-zinc-800 mb-8">
-        <h2 className="text-xl font-semibold mb-4">
-          System Health Score
-        </h2>
-
-        <p className="text-3xl font-bold text-white">
-          {healthScore}
-        </p>
-
-        <p className="text-sm text-zinc-400 mt-2">
-          Composite operational health.
-        </p>
-      </div>
-
-      {/* ================= Pipeline Health ================= */}
-      <div className="p-6 bg-zinc-900 rounded-xl border border-zinc-800">
-        <h2 className="text-xl font-semibold mb-4">
-          Pipeline Health Score
-        </h2>
-
-        <p className="text-3xl font-bold text-white">
-          {pipelineHealth.score}
-        </p>
-
-        <p
-          className={`text-sm mt-2 ${
-            trendDirection === "improving"
-              ? "text-green-400"
-              : trendDirection === "declining"
-              ? "text-red-400"
-              : "text-zinc-400"
-          }`}
-        >
-          {trendDirection.toUpperCase()}
-        </p>
-
-        <p className="text-sm text-zinc-400 mt-2">
-          Composite pipeline performance indicator.
-        </p>
+      {/* Alerts table */}
+      <div className="fade-up delay-2">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+          <div className="label">Alerts</div>
+        </div>
+        <div className="card" style={{ overflow: "hidden" }}>
+          {alerts.length === 0 ? (
+            <div style={{ padding: "32px 20px", textAlign: "center", color: "var(--text-3)", fontSize: "0.875rem" }}>
+              No active alerts — system is healthy.
+            </div>
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Type</th><th>Severity</th><th>Triggered</th></tr>
+              </thead>
+              <tbody>
+                {alerts.map((a) => (
+                  <tr key={a.id}>
+                    <td className="mono" style={{ color: "var(--text-2)" }}>{a.type}</td>
+                    <td><span className={sevPill(a.severity)}>{a.severity}</span></td>
+                    <td className="mono" style={{ color: "var(--text-3)", fontSize: "0.78rem" }}>
+                      {new Date(a.created_at).toLocaleString("en-IN", {
+                        day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                      })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
       </div>
     </div>
   )

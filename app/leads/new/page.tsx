@@ -6,165 +6,109 @@ import { supabase } from "@/lib/supabase"
 import { calculateLeadScore } from "@/lib/leadScore"
 import { logActivity } from "@/lib/activity"
 
+const PLATFORMS = ["YouTube","Instagram","Twitter","LinkedIn","Podcast","Newsletter","Other"]
+
 export default function NewLeadPage() {
   const router = useRouter()
-
-  const [name, setName] = useState("")
-  const [brand, setBrand] = useState("")
-  const [platform, setPlatform] = useState("YouTube")
-  const [subscribers, setSubscribers] = useState("")
-  const [value, setValue] = useState("")
-  const [warmIntro, setWarmIntro] = useState(false)
-
-  const [loading, setLoading] = useState(false)
-  const [errorMessage, setErrorMessage] = useState("")
+  const [name,        setName]       = useState("")
+  const [brand,       setBrand]      = useState("")
+  const [platform,    setPlatform]   = useState("YouTube")
+  const [subscribers, setSubs]       = useState("")
+  const [value,       setValue]      = useState("")
+  const [warmIntro,   setWarmIntro]  = useState(false)
+  const [loading,     setLoading]    = useState(false)
+  const [error,       setError]      = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
-    setErrorMessage("")
+    if (!name.trim()) { setError("Name is required."); return }
+    setLoading(true); setError("")
 
-    const subscriberNumber = Number(subscribers) || 0
-    const dealValue = Number(value) || 0
+    const subs  = Number(subscribers) || 0
+    const deal  = Number(value) || 0
+    const score = calculateLeadScore({ subscribers:subs, outsourcing:false, uploadsWeekly:true, monetized:true, warmIntro })
+    const ts    = new Date().toISOString()
 
-    const computedScore = calculateLeadScore({
-      subscribers: subscriberNumber,
-      outsourcing: false,
-      uploadsWeekly: true,
-      monetized: true,
-      warmIntro,
-    })
-
-    const timestamp = new Date().toISOString()
-
-    const { data: insertedLead, error } = await supabase
+    const { data: lead, error: err } = await supabase
       .from("leads")
-      .insert([
-        {
-          name,
-          brand_name: brand || null,
-          platform,
-          subscriber_count: subscriberNumber,
-          value: dealValue,
-          score: computedScore,
-          status: "New",
-          stage_changed_at: timestamp,
-          converted: false,
-        },
-      ])
-      .select()
-      .single()
+      .insert([{ name:name.trim(), brand_name:brand||null, platform, subscriber_count:subs, value:deal, score, status:"New", stage_changed_at:ts }])
+      .select().single()
 
-    if (error || !insertedLead) {
-      setErrorMessage("Failed to create lead.")
-      setLoading(false)
-      return
-    }
+    if (err || !lead) { setError("Failed to create lead."); setLoading(false); return }
 
-    // ✅ Log lifecycle creation
-    await logActivity({
-      entityType: "lead",
-      entityId: insertedLead.id,
-      type: "lead_created",
-      metadata: {
-        name: insertedLead.name,
-        platform: insertedLead.platform,
-        value: insertedLead.value,
-        score: insertedLead.score,
-        warmIntro,
-      },
-    })
-
+    await logActivity({ entityType:"lead", entityId:lead.id, type:"lead_created", metadata:{ name:lead.name, score, platform } })
     router.push("/leads")
-    router.refresh()
   }
 
   return (
-    <div className="max-w-3xl">
-      <h1 className="text-3xl font-semibold mb-10">Add New Lead</h1>
+    <div>
+      <div className="page-header fade-up">
+        <div className="label">Acquisition</div>
+        <h1>New lead</h1>
+      </div>
 
-      <form
-        onSubmit={handleSubmit}
-        className="bg-zinc-900 text-white p-8 rounded-xl border border-zinc-800 space-y-6"
-      >
-        <div className="space-y-2">
-          <label className="text-sm text-zinc-400">Name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
-            required
-          />
+      <div className="fade-up delay-1" style={{ maxWidth: 480 }}>
+        <div className="card" style={{ padding:"28px 28px" }}>
+          <form onSubmit={handleSubmit}>
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+
+              <Field label="Creator name *">
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Ranveer Allahbadia" autoFocus />
+              </Field>
+
+              <Field label="Brand / channel name">
+                <input type="text" value={brand} onChange={(e) => setBrand(e.target.value)}
+                  placeholder="e.g. BeerBiceps" />
+              </Field>
+
+              <Field label="Platform">
+                <select value={platform} onChange={(e) => setPlatform(e.target.value)}>
+                  {PLATFORMS.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </Field>
+
+              <Field label="Subscriber / follower count">
+                <input type="number" value={subscribers} onChange={(e) => setSubs(e.target.value)}
+                  placeholder="e.g. 500000" min="0" />
+              </Field>
+
+              <Field label="Deal value (₹)">
+                <input type="number" value={value} onChange={(e) => setValue(e.target.value)}
+                  placeholder="e.g. 150000" min="0" />
+              </Field>
+
+              <label style={{ display:"flex", alignItems:"center", gap:10, cursor:"pointer", fontSize:"0.875rem" }}>
+                <input type="checkbox" checked={warmIntro} onChange={(e) => setWarmIntro(e.target.checked)}
+                  style={{ width:"auto" }} />
+                <span>Warm intro / referral</span>
+              </label>
+
+              {error && <div style={{ color:"var(--red)", fontSize:"0.82rem" }}>{error}</div>}
+
+              <div style={{ display:"flex", gap:8, paddingTop:4 }}>
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  {loading ? "Creating…" : "Create lead"}
+                </button>
+                <button type="button" className="btn" onClick={() => router.push("/leads")}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </form>
         </div>
+      </div>
+    </div>
+  )
+}
 
-        <div className="space-y-2">
-          <label className="text-sm text-zinc-400">Brand Name</label>
-          <input
-            value={brand}
-            onChange={(e) => setBrand(e.target.value)}
-            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm text-zinc-400">Platform</label>
-          <select
-            value={platform}
-            onChange={(e) => setPlatform(e.target.value)}
-            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
-          >
-            <option value="YouTube">YouTube</option>
-            <option value="Twitter">Twitter</option>
-            <option value="LinkedIn">LinkedIn</option>
-          </select>
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm text-zinc-400">Subscriber Count</label>
-          <input
-            type="number"
-            value={subscribers}
-            onChange={(e) => setSubscribers(e.target.value)}
-            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <label className="text-sm text-zinc-400">Deal Value (₹)</label>
-          <input
-            type="number"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            className="w-full bg-zinc-800 p-3 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500"
-          />
-        </div>
-
-        <div className="flex items-center gap-3">
-          <input
-            type="checkbox"
-            checked={warmIntro}
-            onChange={() => setWarmIntro(!warmIntro)}
-            className="w-4 h-4"
-          />
-          <label className="text-sm text-zinc-400">
-            Warm Introduction?
-          </label>
-        </div>
-
-        {errorMessage && (
-          <div className="text-red-400 text-sm">{errorMessage}</div>
-        )}
-
-        <div className="pt-4">
-          <button
-            type="submit"
-            disabled={loading}
-            className="bg-zinc-100 text-black px-6 py-3 rounded-lg font-medium hover:bg-white transition disabled:opacity-50"
-          >
-            {loading ? "Creating..." : "Create Lead"}
-          </button>
-        </div>
-      </form>
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label style={{ display:"block", fontSize:"0.78rem", fontWeight:500, color:"var(--text-2)", marginBottom:5 }}>
+        {label}
+      </label>
+      {children}
     </div>
   )
 }

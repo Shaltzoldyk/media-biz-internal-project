@@ -3,28 +3,26 @@
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
 import { logActivity } from "@/lib/activity"
+import { useCurrency } from "@/context/CurrencyContext"
 
-function calculatePeriods(startDate: string, billing: string) {
+function calcPeriods(startDate: string, billing: string): number {
   if (!startDate) return 0
-
-  const start = new Date(startDate)
-  const now = new Date()
-
+  const start = new Date(startDate), now = new Date()
   if (isNaN(start.getTime())) return 0
-
-  const diffMs = now.getTime() - start.getTime()
-  const diffDays = diffMs / (1000 * 60 * 60 * 24)
-
-  if (billing === "weekly") return Math.floor(diffDays / 7)
-  if (billing === "bi_weekly") return Math.floor(diffDays / 14)
-  if (billing === "monthly") return Math.floor(diffDays / 30)
-
+  const days = (now.getTime() - start.getTime()) / 86400000
+  if (billing === "weekly")    return Math.floor(days / 7)
+  if (billing === "bi_weekly") return Math.floor(days / 14)
+  if (billing === "monthly")
+    return (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth())
   return 0
 }
 
 export default function RevenueSection({ client }: { client: any }) {
-  const [amount, setAmount] = useState("")
-  const [records, setRecords] = useState<any[]>([])
+  const [records,   setRecords]   = useState<any[]>([])
+  const [amount,    setAmount]    = useState("")
+  const [showInput, setShowInput] = useState(false)
+  const [adding,    setAdding]    = useState(false)
+  const { fmt }                   = useCurrency()
 
   const fetchRecords = async () => {
     const { data } = await supabase
@@ -32,156 +30,102 @@ export default function RevenueSection({ client }: { client: any }) {
       .select("*")
       .eq("client_id", client.id)
       .order("revenue_date", { ascending: false })
-
     setRecords(data || [])
   }
 
-  useEffect(() => {
-    fetchRecords()
-  }, [])
+  useEffect(() => { fetchRecords() }, [])
 
   const addPayment = async () => {
     if (!amount) return
-
-    const paymentAmount = Number(amount)
-    const revenueDate = new Date().toISOString().split("T")[0]
-
+    setAdding(true)
+    const amt  = Number(amount)
+    const date = new Date().toISOString().split("T")[0]
     const { data, error } = await supabase
       .from("revenue_records")
-      .insert({
-        client_id: client.id,
-        amount: paymentAmount,
-        revenue_date: revenueDate,
-        type: "payment",
-      })
-      .select()
-      .single()
-
-    if (error) {
-      console.error("Error adding payment:", error)
-      return
+      .insert({ client_id:client.id, amount:amt, revenue_date:date, type:"payment" })
+      .select().single()
+    if (!error) {
+      await logActivity({ entityType:"client", entityId:client.id, type:"payment_logged", metadata:{ paymentId:data.id, amount:amt, revenueDate:date } })
     }
-
-    // ✅ Log payment activity
-    await logActivity({
-      entityType: "client",
-      entityId: client.id,
-      type: "payment_logged",
-      metadata: {
-        paymentId: data.id,
-        amount: paymentAmount,
-        revenueDate,
-      },
-    })
-
-    setAmount("")
+    setAmount(""); setAdding(false); setShowInput(false)
     fetchRecords()
   }
 
   const deletePayment = async (id: string) => {
-    const record = records.find((r) => r.id === id)
-    if (!record) return
-
-    const { error } = await supabase
-      .from("revenue_records")
-      .delete()
-      .eq("id", id)
-
-    if (error) {
-      console.error("Error deleting payment:", error)
-      return
-    }
-
-    // ✅ Log deletion activity
-    await logActivity({
-      entityType: "client",
-      entityId: client.id,
-      type: "payment_deleted",
-      metadata: {
-        paymentId: id,
-        amount: record.amount,
-        revenueDate: record.revenue_date,
-      },
-    })
-
+    const r = records.find((x) => x.id === id)
+    if (!r) return
+    await supabase.from("revenue_records").delete().eq("id", id)
+    await logActivity({ entityType:"client", entityId:client.id, type:"payment_deleted", metadata:{ paymentId:id, amount:r.amount } })
     fetchRecords()
   }
 
-  const lifetimeRevenue = records.reduce(
-    (sum, r) => sum + Number(r.amount || 0),
-    0
-  )
-
-  const periods =
-    client.start_date
-      ? Math.max(
-          1,
-          calculatePeriods(client.start_date, client.billing_type)
-        )
-      : 1
-
-  const contractValue = Number(client.contract_value || 0)
-
-  const expectedRevenue =
-    client.billing_type === "one_time"
-      ? contractValue
-      : periods * contractValue
-
-  const outstanding = expectedRevenue - lifetimeRevenue
-
-  const healthColor =
-    outstanding > 0 ? "text-red-400" : "text-green-400"
+  const lifetime    = records.reduce((s, r) => s + Number(r.amount || 0), 0)
+  const periods     = client.start_date ? Math.max(1, calcPeriods(client.start_date, client.billing_type)) : 1
+  const contract    = Number(client.contract_value || 0)
+  const expected    = client.billing_type === "one_time" ? contract : periods * contract
+  const outstanding = expected - lifetime
 
   return (
-    <div className="mt-4 border-t border-zinc-800 pt-4 space-y-3">
-      <div className="text-sm">
-        Lifetime Revenue: ₹ {lifetimeRevenue.toLocaleString()}
-      </div>
-
-      <div className="text-sm">
-        Expected Revenue: ₹ {expectedRevenue.toLocaleString()}
-      </div>
-
-      <div className={`text-sm font-semibold ${healthColor}`}>
-        Outstanding: ₹ {outstanding.toLocaleString()}
-      </div>
-
-      <div className="flex gap-2">
-        <input
-          type="number"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          placeholder="Payment amount"
-          className="bg-zinc-800 p-2 rounded w-full"
-        />
-
-        <button
-          onClick={addPayment}
-          className="bg-green-600 px-3 rounded text-sm"
-        >
-          Add
-        </button>
-      </div>
-
-      <div className="space-y-2 text-sm text-zinc-400">
-        {records.map((r) => (
-          <div
-            key={r.id}
-            className="flex justify-between items-center bg-zinc-800 p-2 rounded"
-          >
-            <div>
-              ₹ {Number(r.amount).toLocaleString()} — {r.revenue_date}
+    <div>
+      {/* Stats */}
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:6, marginBottom:12 }}>
+        {[
+          { label:"Lifetime",    val:lifetime,            color:undefined,                      bg:undefined },
+          { label:"Expected",    val:expected,            color:undefined,                      bg:undefined },
+          { label:"Outstanding", val:Math.abs(outstanding),
+            color: outstanding > 0 ? "var(--red)" : "var(--green)",
+            bg:    outstanding > 0 ? "var(--red-dim)" : "var(--green-dim)" },
+        ].map((s) => (
+          <div key={s.label} style={{
+            background: s.bg || "var(--bg-1)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius)",
+            padding: "8px 10px",
+          }}>
+            <div className="label" style={{ marginBottom:3 }}>{s.label}</div>
+            <div className="mono" style={{ fontSize:"0.8rem", color: s.color || "var(--text)" }}>
+              {fmt(s.val)}
             </div>
-
-            <button
-              onClick={() => deletePayment(r.id)}
-              className="text-red-400 text-xs"
-            >
-              Delete
-            </button>
           </div>
         ))}
       </div>
+
+      {/* Add payment — always in ₹ regardless of display toggle */}
+      {showInput ? (
+        <div style={{ display:"flex", gap:6, marginBottom:10 }}>
+          <input
+            type="number" value={amount} autoFocus
+            onChange={(e) => setAmount(e.target.value)}
+            placeholder="Amount in ₹ INR"
+            onKeyDown={(e) => { if (e.key==="Enter") addPayment(); if (e.key==="Escape") setShowInput(false) }}
+            style={{ flex:1 }}
+          />
+          <button onClick={addPayment} className="btn btn-primary" disabled={adding} style={{ flexShrink:0 }}>
+            {adding ? "…" : "Log"}
+          </button>
+          <button onClick={() => setShowInput(false)} className="btn" style={{ flexShrink:0 }}>×</button>
+        </div>
+      ) : (
+        <button onClick={() => setShowInput(true)} className="btn btn-ghost"
+          style={{ fontSize:"0.75rem", marginBottom: records.length ? 10 : 0 }}>
+          + Log payment
+        </button>
+      )}
+
+      {/* History */}
+      {records.map((r) => (
+        <div key={r.id} style={{
+          display:"flex", justifyContent:"space-between", alignItems:"center",
+          padding:"7px 0", borderTop:"1px solid var(--border)", fontSize:"0.8rem",
+        }}>
+          <span className="mono">{fmt(r.amount)}</span>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <span className="mono" style={{ fontSize:"0.72rem", color:"var(--text-3)" }}>{r.revenue_date}</span>
+            <button onClick={() => deletePayment(r.id)} className="btn btn-ghost btn-danger"
+              style={{ padding:"2px 6px", fontSize:"0.72rem" }}>×</button>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
