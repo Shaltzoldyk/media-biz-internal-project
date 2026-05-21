@@ -1,6 +1,7 @@
 import "./globals.css"
 import Sidebar from "@/components/Sidebar"
 import { CurrencyProvider } from "@/context/CurrencyContext"
+import { ThemeProvider } from "@/context/ThemeContext"
 import { getExchangeRate } from "@/lib/currency"
 
 export const metadata = {
@@ -9,29 +10,47 @@ export const metadata = {
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Fetch rate once at layout level — cached 1hr by Next.js fetch
   const rate = await getExchangeRate()
 
   return (
-    <html lang="en">
-      <body>
+    <html lang="en" suppressHydrationWarning>
+      <head>
         {/*
-          CurrencyProvider is a client component wrapping the entire app.
-          All pages and components can call useCurrency() to get fmt() and toggle().
-          The rate is fetched server-side and passed down — no client fetch needed.
+          Anti-flash script: runs synchronously before React hydrates.
+          Reads localStorage and applies .dark or .light to <html>
+          so there's never a flash of the wrong theme on load.
+          suppressHydrationWarning on <html> prevents the React mismatch warning.
         */}
-        <CurrencyProvider exchangeRate={rate}>
-          <div style={{ display: "flex", minHeight: "100vh" }}>
-            <Sidebar />
-            <main style={{
-              flex: 1,
-              minWidth: 0,
-              padding: "40px 44px",
-            }}>
-              {children}
-            </main>
-          </div>
-        </CurrencyProvider>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                try {
+                  var stored = localStorage.getItem('lead_os_theme');
+                  if (stored === 'dark' || stored === 'light') {
+                    document.documentElement.classList.add(stored);
+                  } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    document.documentElement.classList.add('dark');
+                  } else {
+                    document.documentElement.classList.add('light');
+                  }
+                } catch(e) {}
+              })();
+            `,
+          }}
+        />
+      </head>
+      <body>
+        <ThemeProvider>
+          <CurrencyProvider exchangeRate={rate}>
+            <div style={{ display: "flex", minHeight: "100vh" }}>
+              <Sidebar />
+              <main style={{ flex: 1, minWidth: 0, padding: "40px 44px" }}>
+                {children}
+              </main>
+            </div>
+          </CurrencyProvider>
+        </ThemeProvider>
       </body>
     </html>
   )
