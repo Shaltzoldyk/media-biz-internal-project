@@ -34,7 +34,7 @@ This is a CRM built around the actual workflow, not adapted to fit one.
 The most non-obvious part of the codebase. Seven engines run analysis on top of the base data:
 
 ### Stuck Lead Detection
-Flags leads that haven't changed stage in more than 5 days. Severity scales with time: warning at 5 days, high at 10, critical at 15. Terminal stages (closed won/lost, converted) are excluded from the check.
+Flags leads that haven't changed stage beyond a configurable threshold. Severity escalates the longer a lead remains stuck. Terminal stages (closed won/lost, converted) are excluded from the check.
 
 ### Overdue Follow-Up Detection
 Surfaces leads with a follow-up date that has passed and haven't been contacted. Skips terminal leads.
@@ -54,7 +54,7 @@ Projects next-30-day revenue from a 30-day rolling average, then applies two adj
 Also outputs a **confidence score** (0–1) that discounts the projection based on revenue volatility and client concentration risk. A forecast built on one large client and erratic daily revenue gets a lower confidence score than one built on several stable clients.
 
 ### Adaptive Threshold Engine
-Rather than using fixed alert thresholds, the revenue drop detector calculates a threshold based on the actual volatility of the business over the last 14 days. A business with naturally spiky revenue needs a wider band before a drop registers as anomalous. The threshold scales between 15% and 35% depending on measured volatility — it tightens as the business stabilises.
+Rather than using fixed alert thresholds, the revenue drop detector calculates a threshold based on the actual volatility of the business over the last 14 days. A business with naturally spiky revenue needs a wider band before a drop registers as anomalous. The threshold scales dynamically depending on measured volatility — it tightens as the business stabilises.
 
 The same adaptive logic applies to pipeline stage conversion thresholds.
 
@@ -69,11 +69,11 @@ Runs as a background cycle with five jobs:
 
 | Job | What It Does |
 |---|---|
-| Stalled high-value lead detection | Flags leads above £5,000 value that haven't moved in 5+ days |
+| Stalled high-value lead detection | Flags high-value leads that haven't moved in several days |
 | Revenue drop detection | Compares current vs previous 7-day windows against adaptive threshold |
-| Stage bottleneck detection | Identifies pipeline stages with conversion rates below the adaptive threshold (minimum 5 leads in stage required) |
+| Stage bottleneck detection | Identifies pipeline stages with conversion rates below the adaptive threshold |
 | Aging risk detection | Calculates structural aging risk score across the pipeline; threshold tightens as structural risk increases |
-| Escalation engine | Promotes unresolved automations from high → critical after 3 days of inaction |
+| Escalation engine | Promotes unresolved automations from high → critical after a configurable inaction period |
 
 Each job checks for an existing unresolved record before inserting — no duplicate alerts. All flags write to a unified activity feed with severity, metadata, and timestamps.
 
@@ -81,17 +81,7 @@ Each job checks for an existing unresolved record before inserting — no duplic
 
 ## Lead Scoring
 
-Leads are scored at creation on five signals specific to creator business partnerships:
-
-| Signal | Weight |
-|---|---|
-| Subscriber count ≥ 100K | +2 |
-| Already outsourcing production | +3 |
-| Uploads weekly or more | +2 |
-| Monetized channel | +2 |
-| Warm introduction | +3 |
-
-Maximum score: 10. Scoring is intentionally simple — the weights reflect which signals have historically indicated a higher close rate in this specific business context.
+Leads are scored at creation on five signals specific to creator business partnerships: subscriber count, whether they outsource production, upload cadence, channel monetisation status, and warmth of introduction. Scoring is intentionally simple and weighted toward signals that have historically correlated with close rate in this context.
 
 ---
 

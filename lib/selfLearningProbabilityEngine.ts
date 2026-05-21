@@ -19,7 +19,10 @@ export async function getSelfLearningStageProbabilities() {
     stageTotals[stage] =
       (stageTotals[stage] || 0) + 1
 
-    if (lead.status === "Client") {
+    // Count a win against the stage the lead was in when it converted.
+    // After conversion the lead's status stays as-is (e.g. "Responded"),
+    // so we check converted === true rather than status === "Client".
+    if (lead.converted === true) {
       stageWins[stage] =
         (stageWins[stage] || 0) + 1
     }

@@ -241,6 +241,7 @@ async function handleStageBottlenecks() {
       .eq("type", "stage_bottleneck")
       .eq("entity_type", "system")
       .eq("resolved", false)
+      .eq("stage_name", stage)
       .maybeSingle()
 
     if (existing) continue
@@ -250,6 +251,7 @@ async function handleStageBottlenecks() {
       entity_type: "system",
       entity_id: null,
       severity: "high",
+      stage_name: stage,   // stored so future dedup queries can filter by it
     })
 
     await supabase.from("activities").insert({
