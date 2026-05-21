@@ -6,12 +6,18 @@ export const dynamic = "force-dynamic"
 export default async function ClientsPage() {
   const [{ data: clients, error }, { data: revenue }] = await Promise.all([
     supabase.from("clients").select("*").order("created_at", { ascending: false }),
-    supabase.from("revenue_records").select("*"),
+    supabase.from("revenue_records").select("client_id, amount, revenue_date"),
   ])
 
-  if (error) return <div style={{ color:"var(--red)" }}>Error loading clients.</div>
+  if (error) return <div style={{ color: "var(--red)" }}>Error loading clients.</div>
 
   const active = (clients || []).filter((c) => c.status !== "churned")
+
+  // P-7: build revenue totals map once — O(n) instead of O(n²)
+  const revenueTotals = new Map<string, number>()
+  for (const r of revenue || []) {
+    revenueTotals.set(r.client_id, (revenueTotals.get(r.client_id) || 0) + Number(r.amount || 0))
+  }
 
   const totalMRR = active.reduce((sum, c) => {
     const v = Number(c.contract_value || 0)
@@ -22,15 +28,15 @@ export default async function ClientsPage() {
   }, 0)
 
   const totalOutstanding = active.reduce((sum, c) => {
-    const paid = (revenue || [])
-      .filter((r) => r.client_id === c.id)
-      .reduce((s, r) => s + Number(r.amount || 0), 0)
-    const val = Number(c.contract_value || 0)
+    const paid = revenueTotals.get(c.id) || 0
+    const val  = Number(c.contract_value || 0)
     let expected = 0
+
     if (c.billing_type === "one_time") {
       expected = val
     } else if (c.start_date) {
-      const start = new Date(c.start_date), now = new Date()
+      const start = new Date(c.start_date)
+      const now   = new Date()
       const days  = (now.getTime() - start.getTime()) / 86400000
       let periods = 0
       if (c.billing_type === "weekly")    periods = Math.floor(days / 7)
@@ -39,6 +45,7 @@ export default async function ClientsPage() {
         periods = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth())
       expected = Math.max(1, periods) * val
     }
+
     return sum + Math.max(0, expected - paid)
   }, 0)
 
@@ -49,9 +56,6 @@ export default async function ClientsPage() {
         <h1>Clients</h1>
       </div>
 
-      {/* Stats — currency-aware via context in a client wrapper would be ideal,
-          but these raw numbers are fine as server-rendered since ClientCard
-          and RevenueSection handle the live formatting via useCurrency() */}
       <div className="fade-up delay-1" style={{
         display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 28,
       }}>
@@ -61,7 +65,7 @@ export default async function ClientsPage() {
         </div>
         <div className="card stat">
           <div className="label">Est. MRR (₹)</div>
-          <div className="val" style={{ fontSize:"1.3rem" }}>
+          <div className="val" style={{ fontSize: "1.3rem" }}>
             ₹{totalMRR.toLocaleString("en-IN")}
           </div>
           <div className="sub">stored in INR · toggle ₹/$ in sidebar</div>
@@ -69,7 +73,7 @@ export default async function ClientsPage() {
         <div className="card stat">
           <div className="label">Outstanding (₹)</div>
           <div className="val" style={{
-            fontSize:"1.3rem",
+            fontSize: "1.3rem",
             color: totalOutstanding > 0 ? "var(--red)" : "var(--green)",
           }}>
             ₹{totalOutstanding.toLocaleString("en-IN")}
@@ -83,7 +87,7 @@ export default async function ClientsPage() {
         gap: 14,
       }}>
         {active.length === 0
-          ? <div style={{ color:"var(--text-3)" }}>No active clients yet.</div>
+          ? <div style={{ color: "var(--text-3)" }}>No active clients yet.</div>
           : active.map((c) => <ClientCard key={c.id} client={c} />)}
       </div>
     </div>

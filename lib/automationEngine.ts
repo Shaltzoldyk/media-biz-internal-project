@@ -2,131 +2,126 @@ import { supabase } from "@/lib/supabase"
 import { calculateLeadAgingDistribution } from "@/lib/leadAgingEngine"
 import { getAdaptiveRevenueDropThreshold } from "@/lib/adaptiveThresholdEngine"
 import { getAdaptiveStageThreshold } from "@/lib/adaptivePipelineThresholdEngine"
+import type { LeadRow, RevenueRow } from "@/lib/intelligenceRunner"
 
-const HIGH_VALUE_THRESHOLD = 5000
+const HIGH_VALUE_THRESHOLD  = 5000
 const STALLED_DAYS_THRESHOLD = 5
-const ESCALATION_DAYS = 3
-const MIN_STAGE_SAMPLE_SIZE = 5
+const ESCALATION_DAYS        = 3
+const MIN_STAGE_SAMPLE_SIZE  = 5
 
-export async function runAutomationCycle() {
-  await handleStalledHighValueLeads()
-  await handleRevenueDropDetection()
-  await handleStageBottlenecks()
-  await handleAgingRisk()
-  await escalateUnresolvedAutomations()
+/* ================================
+   PUBLIC RUNNER
+   P-4: all 5 handlers run in parallel with Promise.all
+================================ */
+
+export async function runAutomationCycle(
+  leads:   LeadRow[],
+  revenue: RevenueRow[]
+) {
+  await Promise.all([
+    handleStalledHighValueLeads(leads),
+    handleRevenueDropDetection(revenue),
+    handleStageBottlenecks(leads),
+    handleAgingRisk(leads),
+    escalateUnresolvedAutomations(),
+  ])
 }
 
 /* ================================
    STALLED HIGH VALUE LEADS
+   P-1: receives pre-fetched leads (no DB call)
 ================================ */
 
-async function handleStalledHighValueLeads() {
-  const { data: leads, error } = await supabase
-    .from("leads")
-    .select("*")
-
-  if (error || !leads) return
-
+async function handleStalledHighValueLeads(leads: LeadRow[]) {
   const now = new Date()
 
-  for (const lead of leads) {
-    if (!lead.value || Number(lead.value) < HIGH_VALUE_THRESHOLD) continue
-    if (!lead.stage_changed_at) continue
-
-    const stageChanged = new Date(lead.stage_changed_at)
+  const stalled = leads.filter((lead) => {
+    if (!lead.value || Number(lead.value) < HIGH_VALUE_THRESHOLD) return false
+    if (!lead.stage_changed_at) return false
     const diffDays =
-      (now.getTime() - stageChanged.getTime()) /
+      (now.getTime() - new Date(lead.stage_changed_at).getTime()) /
       (1000 * 60 * 60 * 24)
+    return diffDays >= STALLED_DAYS_THRESHOLD
+  })
 
-    if (diffDays < STALLED_DAYS_THRESHOLD) continue
+  if (stalled.length === 0) return
 
-    const { data: existing } = await supabase
-      .from("automations_log")
-      .select("id")
-      .eq("type", "stalled_high_value_lead")
-      .eq("entity_id", lead.id)
-      .eq("resolved", false)
-      .maybeSingle()
+  // Check existing open alerts in one query
+  const { data: existing } = await supabase
+    .from("automations_log")
+    .select("entity_id")
+    .eq("type", "stalled_high_value_lead")
+    .eq("resolved", false)
+    .in("entity_id", stalled.map((l) => l.id))
 
-    if (existing) continue
+  const alreadyFlagged = new Set((existing || []).map((r) => r.entity_id))
 
-    await supabase.from("automations_log").insert({
-      type: "stalled_high_value_lead",
-      entity_type: "lead",
-      entity_id: lead.id,
-      severity: "high",
+  const jobs = stalled
+    .filter((lead) => !alreadyFlagged.has(lead.id))
+    .map(async (lead) => {
+      const diffDays =
+        (now.getTime() - new Date(lead.stage_changed_at!).getTime()) /
+        (1000 * 60 * 60 * 24)
+
+      await supabase.from("automations_log").insert({
+        type:        "stalled_high_value_lead",
+        entity_type: "lead",
+        entity_id:   lead.id,
+        severity:    "high",
+      })
+
+      await supabase.from("activities").insert({
+        entity_type: "lead",
+        entity_id:   lead.id,
+        type:        "system_flag",
+        message:     `High-value lead stalled for ${Math.floor(diffDays)} days.`,
+        severity:    "high",
+        metadata: {
+          daysInStage: Math.floor(diffDays),
+          threshold:   STALLED_DAYS_THRESHOLD,
+          value:       lead.value,
+        },
+        created_at: new Date().toISOString(),
+      })
     })
 
-    await supabase.from("activities").insert({
-      entity_type: "lead",
-      entity_id: lead.id,
-      type: "system_flag",
-      message: `High-value lead stalled for ${Math.floor(diffDays)} days.`,
-      severity: "high",
-      metadata: {
-        daysInStage: Math.floor(diffDays),
-        threshold: STALLED_DAYS_THRESHOLD,
-        value: lead.value,
-      },
-      created_at: new Date().toISOString(),
-    })
-  }
+  await Promise.all(jobs)
 }
 
 /* ================================
    REVENUE DROP DETECTION (Adaptive)
+   P-1: receives pre-fetched revenue (no DB call)
 ================================ */
 
-async function handleRevenueDropDetection() {
-  const now = new Date()
+async function handleRevenueDropDetection(revenue: RevenueRow[]) {
+  if (!revenue || revenue.length === 0) return
 
-  const sevenDaysAgo = new Date(
-    now.getTime() - 7 * 24 * 60 * 60 * 1000
-  )
+  const now            = new Date()
+  const sevenDaysAgo   = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000)
+  const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
 
-  const fourteenDaysAgo = new Date(
-    now.getTime() - 14 * 24 * 60 * 60 * 1000
-  )
-
-  const { data: revenueRecords } = await supabase
-    .from("revenue_records")
-    .select("*")
-
-  if (!revenueRecords || revenueRecords.length === 0) return
-
-  let currentWindow = 0
+  let currentWindow  = 0
   let previousWindow = 0
 
-  for (const record of revenueRecords) {
+  for (const record of revenue) {
     if (!record.created_at) continue
-
     const created = new Date(record.created_at)
-    const amount = Number(record.amount || 0)
-
+    const amount  = Number(record.amount || 0)
     if (created >= sevenDaysAgo) {
       currentWindow += amount
-    } else if (
-      created >= fourteenDaysAgo &&
-      created < sevenDaysAgo
-    ) {
+    } else if (created >= fourteenDaysAgo) {
       previousWindow += amount
     }
   }
 
   if (previousWindow === 0) return
 
-  const percentDrop =
-    (previousWindow - currentWindow) / previousWindow
-
-  const adaptiveThreshold =
-    await getAdaptiveRevenueDropThreshold()
+  const percentDrop = (previousWindow - currentWindow) / previousWindow
+  const adaptiveThreshold = await getAdaptiveRevenueDropThreshold(revenue)
 
   if (percentDrop <= adaptiveThreshold) return
 
-  const severity =
-    percentDrop > adaptiveThreshold * 2
-      ? "critical"
-      : "high"
+  const severity = percentDrop > adaptiveThreshold * 2 ? "critical" : "high"
 
   const { data: existing } = await supabase
     .from("automations_log")
@@ -137,156 +132,119 @@ async function handleRevenueDropDetection() {
 
   if (existing) return
 
-  await supabase.from("automations_log").insert({
-    type: "revenue_drop",
-    entity_type: "system",
-    entity_id: null,
-    severity,
-  })
-
-  await supabase.from("activities").insert({
-    entity_type: "system",
-    entity_id: null,
-    type: "system_flag",
-    message: `Revenue dropped ${Math.round(
-      percentDrop * 100
-    )}% compared to previous 7 days.`,
-    severity,
-    metadata: {
-      currentWindow,
-      previousWindow,
-      percentDrop,
-      adaptiveThreshold,
-    },
-    created_at: new Date().toISOString(),
-  })
+  await Promise.all([
+    supabase.from("automations_log").insert({
+      type:        "revenue_drop",
+      entity_type: "system",
+      entity_id:   null,
+      severity,
+    }),
+    supabase.from("activities").insert({
+      entity_type: "system",
+      entity_id:   null,
+      type:        "system_flag",
+      message:     `Revenue dropped ${Math.round(percentDrop * 100)}% compared to previous 7 days.`,
+      severity,
+      metadata: { currentWindow, previousWindow, percentDrop, adaptiveThreshold },
+      created_at: new Date().toISOString(),
+    }),
+  ])
 }
 
 /* ================================
    STAGE BOTTLENECK DETECTION (Adaptive)
+   P-1: receives pre-fetched leads (no DB call)
 ================================ */
 
-async function handleStageBottlenecks() {
-  const { data: leads } = await supabase
-    .from("leads")
-    .select("*")
+async function handleStageBottlenecks(leads: LeadRow[]) {
+  if (!leads || leads.length === 0) return
 
-  if (!leads) return
-
-  const adaptiveThreshold =
-    await getAdaptiveStageThreshold()
+  const adaptiveThreshold = await getAdaptiveStageThreshold(leads)
 
   const stageTotals: Record<string, number> = {}
-  const stageConversions: Record<string, number> = {}
-
-  // Count every lead's current stage toward stageTotals.
-  // A converted lead (converted === true) is a win — we credit
-  // the conversion to the stage it currently sits in (or "Client").
-  // To attribute wins back to earlier stages we use the total
-  // conversion count as a pool: each non-terminal stage's win rate
-  // is estimated as (total converted leads) / (total non-terminal leads).
-  // This is conservative but honest given we have no stage-history table.
-
   let totalConverted = 0
-  let totalActive = 0
+  let totalActive    = 0
 
   for (const lead of leads) {
     const stage = lead.status
     if (!stage) continue
-
     stageTotals[stage] = (stageTotals[stage] || 0) + 1
-
-    if (lead.converted === true) {
-      totalConverted++
-    }
-
-    if (stage !== "Client" && stage !== "Lost") {
-      totalActive++
-    }
+    if (lead.converted === true) totalConverted++
+    if (stage !== "Client" && stage !== "Lost") totalActive++
   }
 
-  // Distribute wins proportionally across non-terminal stages
-  // (equal share per stage is the least-biased estimate without history)
+  const stageConversions: Record<string, number> = {}
   const nonTerminalStages = Object.keys(stageTotals).filter(
     (s) => s !== "Client" && s !== "Lost"
   )
 
   for (const stage of nonTerminalStages) {
-    const stageTotal = stageTotals[stage]
-    if (totalActive === 0) {
-      stageConversions[stage] = 0
-    } else {
-      // Stage's share of total wins, weighted by its proportion of active leads
-      stageConversions[stage] =
-        totalConverted * (stageTotal / totalActive)
-    }
+    stageConversions[stage] =
+      totalActive > 0
+        ? totalConverted * (stageTotals[stage] / totalActive)
+        : 0
   }
 
-  for (const stage in stageTotals) {
-    if (stage === "Client" || stage === "Lost") continue
-
+  const bottleneckStages = nonTerminalStages.filter((stage) => {
     const total = stageTotals[stage]
-    if (total < MIN_STAGE_SAMPLE_SIZE) continue
+    if (total < MIN_STAGE_SAMPLE_SIZE) return false
+    const rate = (stageConversions[stage] || 0) / total
+    return rate < adaptiveThreshold
+  })
 
-    const conversions =
-      stageConversions[stage] || 0
+  if (bottleneckStages.length === 0) return
 
-    const rate = conversions / total
+  // Check existing open alerts for all bottleneck stages in one query
+  const { data: existing } = await supabase
+    .from("automations_log")
+    .select("stage_name")
+    .eq("type", "stage_bottleneck")
+    .eq("entity_type", "system")
+    .eq("resolved", false)
+    .in("stage_name", bottleneckStages)
 
-    if (rate >= adaptiveThreshold) continue
+  const alreadyFlagged = new Set((existing || []).map((r) => r.stage_name))
 
-    const { data: existing } = await supabase
-      .from("automations_log")
-      .select("id")
-      .eq("type", "stage_bottleneck")
-      .eq("entity_type", "system")
-      .eq("resolved", false)
-      .eq("stage_name", stage)
-      .maybeSingle()
+  const jobs = bottleneckStages
+    .filter((stage) => !alreadyFlagged.has(stage))
+    .map(async (stage) => {
+      const total = stageTotals[stage]
+      const rate  = (stageConversions[stage] || 0) / total
 
-    if (existing) continue
-
-    await supabase.from("automations_log").insert({
-      type: "stage_bottleneck",
-      entity_type: "system",
-      entity_id: null,
-      severity: "high",
-      stage_name: stage,   // stored so future dedup queries can filter by it
+      await Promise.all([
+        supabase.from("automations_log").insert({
+          type:        "stage_bottleneck",
+          entity_type: "system",
+          entity_id:   null,
+          severity:    "high",
+          stage_name:  stage,
+        }),
+        supabase.from("activities").insert({
+          entity_type: "system",
+          entity_id:   null,
+          type:        "system_flag",
+          message:     `Stage "${stage}" conversion rate dropped to ${(rate * 100).toFixed(1)}%.`,
+          severity:    "high",
+          metadata:    { stage, conversionRate: rate, sampleSize: total, adaptiveThreshold },
+          created_at:  new Date().toISOString(),
+        }),
+      ])
     })
 
-    await supabase.from("activities").insert({
-      entity_type: "system",
-      entity_id: null,
-      type: "system_flag",
-      message: `Stage "${stage}" conversion rate dropped to ${(rate * 100).toFixed(1)}%.`,
-      severity: "high",
-      metadata: {
-        stage,
-        conversionRate: rate,
-        sampleSize: total,
-        adaptiveThreshold,
-      },
-      created_at: new Date().toISOString(),
-    })
-  }
+  await Promise.all(jobs)
 }
 
 /* ================================
    AGING RISK DETECTION (Adaptive)
+   P-1: receives pre-fetched leads (no DB call)
 ================================ */
 
-async function handleAgingRisk() {
-  const aging = await calculateLeadAgingDistribution()
+async function handleAgingRisk(leads: LeadRow[]) {
+  const aging = await calculateLeadAgingDistribution(leads)
+  if (!aging || aging.structuralRiskScore === undefined) return
 
-  if (!aging || aging.structuralRiskScore === undefined)
-    return
-
-  // 🔥 Dynamic threshold (tightens as structural risk rises)
-  const adaptiveAgingThreshold =
-    0.25 + aging.structuralRiskScore * 0.3
-
-  if (aging.structuralRiskScore < adaptiveAgingThreshold)
-    return
+  const adaptiveAgingThreshold = 0.25 + aging.structuralRiskScore * 0.3
+  if (aging.structuralRiskScore < adaptiveAgingThreshold) return
 
   const { data: existing } = await supabase
     .from("automations_log")
@@ -297,74 +255,87 @@ async function handleAgingRisk() {
 
   if (existing) return
 
-  await supabase.from("automations_log").insert({
-    type: "aging_risk",
-    entity_type: "system",
-    entity_id: null,
-    severity: "high",
-  })
-
-  await supabase.from("activities").insert({
-    entity_type: "system",
-    entity_id: null,
-    type: "system_flag",
-    message: "Structural aging risk detected in pipeline.",
-    severity: "high",
-    metadata: {
-      buckets: aging.buckets,
-      structuralRiskScore: aging.structuralRiskScore,
-      adaptiveAgingThreshold,
-    },
-    created_at: new Date().toISOString(),
-  })
+  await Promise.all([
+    supabase.from("automations_log").insert({
+      type:        "aging_risk",
+      entity_type: "system",
+      entity_id:   null,
+      severity:    "high",
+    }),
+    supabase.from("activities").insert({
+      entity_type: "system",
+      entity_id:   null,
+      type:        "system_flag",
+      message:     "Structural aging risk detected in pipeline.",
+      severity:    "high",
+      metadata: {
+        buckets:              aging.buckets,
+        structuralRiskScore:  aging.structuralRiskScore,
+        adaptiveAgingThreshold,
+      },
+      created_at: new Date().toISOString(),
+    }),
+  ])
 }
 
 /* ================================
    ESCALATION ENGINE
+   P-5: group by target severity, 2 batch updates max
 ================================ */
 
 async function escalateUnresolvedAutomations() {
   const { data: openAutomations } = await supabase
     .from("automations_log")
-    .select("*")
+    .select("id, severity, created_at, entity_type, entity_id")
     .eq("resolved", false)
 
-  if (!openAutomations) return
+  if (!openAutomations || openAutomations.length === 0) return
 
   const now = new Date()
+
+  const toHigh:     string[] = []
+  const toCritical: string[] = []
+  const activityInserts: object[] = []
 
   for (const automation of openAutomations) {
     if (!automation.created_at) continue
     if (automation.severity === "critical") continue
 
-    const created = new Date(automation.created_at)
     const diffDays =
-      (now.getTime() - created.getTime()) /
+      (now.getTime() - new Date(automation.created_at).getTime()) /
       (1000 * 60 * 60 * 24)
 
     if (diffDays < ESCALATION_DAYS) continue
 
-    const newSeverity =
-      automation.severity === "high"
-        ? "critical"
-        : "high"
+    const newSeverity = automation.severity === "high" ? "critical" : "high"
 
-    await supabase
-      .from("automations_log")
-      .update({ severity: newSeverity })
-      .eq("id", automation.id)
+    if (newSeverity === "critical") toCritical.push(automation.id)
+    else                            toHigh.push(automation.id)
 
-    await supabase.from("activities").insert({
+    activityInserts.push({
       entity_type: automation.entity_type,
-      entity_id: automation.entity_id,
-      type: "system_flag",
-      message: `Automation escalated to ${newSeverity}.`,
-      severity: newSeverity,
-      metadata: {
-        escalatedFrom: automation.severity,
-        escalatedAfterDays: Math.floor(diffDays),
+      entity_id:   automation.entity_id,
+      type:        "system_flag",
+      message:     `Automation escalated to ${newSeverity}.`,
+      severity:    newSeverity,
+      metadata:    {
+        escalatedFrom:       automation.severity,
+        escalatedAfterDays:  Math.floor(diffDays),
       },
       created_at: new Date().toISOString(),
     })
   }
+
+  // 2 batch updates max regardless of how many automations need escalating
+  await Promise.all([
+    toCritical.length > 0
+      ? supabase.from("automations_log").update({ severity: "critical" }).in("id", toCritical)
+      : Promise.resolve(),
+    toHigh.length > 0
+      ? supabase.from("automations_log").update({ severity: "high" }).in("id", toHigh)
+      : Promise.resolve(),
+    activityInserts.length > 0
+      ? supabase.from("activities").insert(activityInserts)
+      : Promise.resolve(),
+  ])
 }

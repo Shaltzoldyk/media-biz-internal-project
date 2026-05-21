@@ -13,6 +13,7 @@ export type ActivityType =
   | "payment_logged"
   | "payment_deleted"
   | "lead_created"
+  | "client_deleted"
   | "system_flag"
 
 export type ActivitySeverity =

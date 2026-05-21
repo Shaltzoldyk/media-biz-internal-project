@@ -20,5 +20,5 @@ export type Lead = {
   converted_at?: string | null
   client_id?: string | null
 
-  created_at?: string
+  created_at: string
 }

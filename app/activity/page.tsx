@@ -58,6 +58,9 @@ function formatActivity(activity: Activity) {
     case "payment_deleted":
       return `Payment deleted → ${formatCurrency(meta.amount)}`
 
+    case "client_deleted":
+      return `Client deleted — ${meta.name || ""}`
+
     case "note":
       if (meta.action === "lead_deleted") {
         return `Lead deleted — ${meta.name || ""}`

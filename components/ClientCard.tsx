@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import RevenueSection from "./RevenueSection"
 import { logActivity } from "@/lib/activity"
@@ -11,11 +12,13 @@ const billingLabel: Record<string,string> = {
 }
 
 export default function ClientCard({ client }: { client: any }) {
-  const [editing, setEditing] = useState(false)
-  const [value,   setValue]   = useState(client.contract_value || 0)
-  const [billing, setBilling] = useState(client.billing_type)
-  const [saving,  setSaving]  = useState(false)
-  const { fmt }               = useCurrency()
+  const [editing,  setEditing]  = useState(false)
+  const [value,    setValue]    = useState(client.contract_value || 0)
+  const [billing,  setBilling]  = useState(client.billing_type)
+  const [saving,   setSaving]   = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const { fmt }                 = useCurrency()
+  const router                  = useRouter()
 
   const save = async () => {
     setSaving(true)
@@ -31,6 +34,29 @@ export default function ClientCard({ client }: { client: any }) {
     }
     setSaving(false); setEditing(false)
     location.reload()
+  }
+
+  const deleteClient = async () => {
+    if (!confirm(`Delete ${client.name}? This will also remove all their revenue records.`)) return
+    setDeleting(true)
+
+    // Log before deleting so the activity write succeeds while the client still exists
+    await logActivity({
+      entityType: "client",
+      entityId:   client.id,
+      type:       "client_deleted",
+      metadata:   {
+        name:           client.name,
+        contract_value: client.contract_value,
+        billing_type:   client.billing_type,
+      },
+    })
+
+    // Delete revenue records first (FK constraint)
+    await supabase.from("revenue_records").delete().eq("client_id", client.id)
+    await supabase.from("clients").delete().eq("id", client.id)
+
+    router.refresh()
   }
 
   const initials = client.name.split(" ").map((w: string) => w[0]).join("").toUpperCase().slice(0, 2)
@@ -54,9 +80,19 @@ export default function ClientCard({ client }: { client: any }) {
             </div>
           </div>
         </div>
-        <button onClick={() => setEditing(!editing)} className="btn" style={{ padding:"3px 10px", fontSize:"0.75rem" }}>
-          {editing ? "Cancel" : "Edit"}
-        </button>
+        <div style={{ display:"flex", gap:6 }}>
+          <button onClick={() => setEditing(!editing)} className="btn" style={{ padding:"3px 10px", fontSize:"0.75rem" }}>
+            {editing ? "Cancel" : "Edit"}
+          </button>
+          <button
+            onClick={deleteClient}
+            disabled={deleting}
+            className="btn btn-ghost btn-danger"
+            style={{ padding:"3px 10px", fontSize:"0.75rem" }}
+          >
+            {deleting ? "…" : "Delete"}
+          </button>
+        </div>
       </div>
 
       {editing ? (
