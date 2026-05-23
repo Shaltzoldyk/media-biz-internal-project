@@ -17,6 +17,7 @@ const nav = [
   { group: "Revenue", items: [
     { name: "Clients",   href: "/clients" },
     { name: "Analytics", href: "/analytics" },
+    { name: "Expenses",  href: "/expenses" },
   ]},
   { group: "Log", items: [
     { name: "Activity", href: "/activity" },
