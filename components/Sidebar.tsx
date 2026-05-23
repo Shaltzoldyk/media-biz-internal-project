@@ -15,9 +15,10 @@ const nav = [
     { name: "Pipeline", href: "/pipeline" },
   ]},
   { group: "Revenue", items: [
-    { name: "Clients",   href: "/clients" },
-    { name: "Analytics", href: "/analytics" },
-    { name: "Expenses",  href: "/expenses" },
+    { name: "Clients",       href: "/clients" },
+    { name: "Analytics",     href: "/analytics" },
+    { name: "Expenses",      href: "/expenses" },
+    { name: "Balance Sheet", href: "/balance-sheet" },
   ]},
   { group: "Log", items: [
     { name: "Activity", href: "/activity" },
