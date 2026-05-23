@@ -36,6 +36,7 @@ export type LeadRow = Pick<
   | "follow_up_date"
   | "value"
   | "converted"
+  | "stage_at_conversion"
 >
 
 export type ClientRow = {
@@ -63,7 +64,7 @@ async function fetchSharedData() {
     await Promise.all([
       supabase
         .from("leads")
-        .select("id, status, stage_changed_at, follow_up_date, value, converted"),
+        .select("id, status, stage_changed_at, follow_up_date, value, converted, stage_at_conversion"),
       supabase
         .from("clients")
         .select("id, name, billing_type, start_date, status"),

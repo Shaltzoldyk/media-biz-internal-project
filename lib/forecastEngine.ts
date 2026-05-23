@@ -29,13 +29,17 @@ export async function calculateRevenueForecast() {
     now.getTime() - 15 * 24 * 60 * 60 * 1000
   )
 
+  // Only fetch the last 30 days of revenue — the full history is never needed
+  // here and grows unboundedly. Column-scoped to avoid fetching unused fields.
   const { data: revenueRecords } = await supabase
     .from("revenue_records")
-    .select("*")
+    .select("id, client_id, amount, revenue_date, created_at")
+    .gte("created_at", thirtyDaysAgo.toISOString())
 
+  // Only fetch the columns the at-risk detection and concentration logic need.
   const { data: clients } = await supabase
     .from("clients")
-    .select("*")
+    .select("id, name, billing_type, start_date, status")
 
   if (!revenueRecords || revenueRecords.length === 0) {
     return {

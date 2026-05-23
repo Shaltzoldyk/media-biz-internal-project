@@ -18,6 +18,11 @@ export async function runAutomationCycle(
   leads:   LeadRow[],
   revenue: RevenueRow[]
 ) {
+  // Run resolution pass first so that health scores and escalation logic
+  // operate on a clean set of open alerts — not ones whose underlying
+  // condition has already cleared.
+  await resolveStaleAutomations(leads, revenue)
+
   await Promise.all([
     handleStalledHighValueLeads(leads),
     handleRevenueDropDetection(revenue),
@@ -25,6 +30,94 @@ export async function runAutomationCycle(
     handleAgingRisk(leads),
     escalateUnresolvedAutomations(),
   ])
+}
+
+/* ================================
+   RESOLUTION PASS
+   Closes alerts whose underlying condition has cleared.
+   Runs before the detection jobs so escalation never
+   promotes an alert that should already be resolved.
+================================ */
+
+async function resolveStaleAutomations(leads: LeadRow[], revenue: RevenueRow[]) {
+  const { data: open } = await supabase
+    .from("automations_log")
+    .select("id, type, entity_id, created_at")
+    .eq("resolved", false)
+
+  if (!open || open.length === 0) return
+
+  const now = new Date()
+
+  // Build fast-lookup sets from current data
+  const stalledHighValueIds = new Set(
+    leads
+      .filter((lead) => {
+        if (!lead.value || Number(lead.value) < HIGH_VALUE_THRESHOLD) return false
+        if (!lead.stage_changed_at) return false
+        const diffDays =
+          (now.getTime() - new Date(lead.stage_changed_at).getTime()) /
+          (1000 * 60 * 60 * 24)
+        return diffDays >= STALLED_DAYS_THRESHOLD
+      })
+      .map((l) => l.id)
+  )
+
+  // Check if revenue drop condition still holds
+  let revenueDropStillActive = false
+  if (revenue.length > 0) {
+    const sevenDaysAgo    = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000)
+    const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
+    let current = 0, previous = 0
+    for (const r of revenue) {
+      if (!r.created_at) continue
+      const created = new Date(r.created_at)
+      const amount  = Number(r.amount || 0)
+      if (created >= sevenDaysAgo)    current  += amount
+      else if (created >= fourteenDaysAgo) previous += amount
+    }
+    if (previous > 0) {
+      const drop      = (previous - current) / previous
+      const threshold = await getAdaptiveRevenueDropThreshold(revenue)
+      revenueDropStillActive = drop > threshold
+    }
+  }
+
+  const toResolve: string[] = []
+
+  for (const alert of open) {
+    let shouldResolve = false
+
+    if (alert.type === "stalled_high_value_lead") {
+      // Resolve if lead has since moved stage (no longer in stalled set)
+      shouldResolve = alert.entity_id
+        ? !stalledHighValueIds.has(alert.entity_id)
+        : false
+    } else if (alert.type === "revenue_drop") {
+      shouldResolve = !revenueDropStillActive
+    }
+    // stage_bottleneck and aging_risk are recalculated each cycle;
+    // resolve them if they're older than 24 hours and no new one was inserted
+    // (the dedup check in the handler means a new one only appears if still triggered)
+    else if (
+      alert.type === "stage_bottleneck" ||
+      alert.type === "aging_risk"
+    ) {
+      const ageHours =
+        (now.getTime() - new Date(alert.created_at).getTime()) /
+        (1000 * 60 * 60)
+      shouldResolve = ageHours >= 24
+    }
+
+    if (shouldResolve) toResolve.push(alert.id)
+  }
+
+  if (toResolve.length === 0) return
+
+  await supabase
+    .from("automations_log")
+    .update({ resolved: true, resolved_at: now.toISOString() })
+    .in("id", toResolve)
 }
 
 /* ================================

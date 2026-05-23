@@ -2,6 +2,8 @@ import { supabase } from "@/lib/supabase"
 import { notFound } from "next/navigation"
 import ActivityTimeline from "@/components/ActivityTimeline"
 import { getStageStatus } from "@/lib/stageVelocity"
+import { calculateLeadScore } from "@/lib/leadScore"
+import RecalculateScoreButton from "@/components/RecalculateScoreButton"
 
 export default async function LeadDetailPage({
   params,
@@ -28,6 +30,16 @@ export default async function LeadDetailPage({
       : velocity === "yellow"
       ? "text-yellow-400"
       : "text-red-400"
+
+  const signals = [
+    { label: "Warm intro / referral",         value: lead.signal_warm_intro,       points: 3 },
+    { label: "Already outsourcing production", value: lead.signal_outsourcing,      points: 3 },
+    { label: "Uploads weekly or more",         value: lead.signal_uploads_weekly,   points: 2 },
+    { label: "Monetized channel",              value: lead.signal_monetized,        points: 2 },
+    { label: "100k+ subscribers",              value: (lead.subscriber_count ?? 0) >= 100000, points: 2, derived: true },
+  ]
+
+  const signalsKnown = lead.signal_warm_intro != null
 
   return (
     <div className="max-w-4xl space-y-8">
@@ -73,10 +85,15 @@ export default async function LeadDetailPage({
           </div>
 
           <div>
-            <div className="text-xs text-zinc-500 uppercase">
+            <div className="text-xs text-zinc-500 uppercase mb-1">
               Score
             </div>
-            <div>🔥 {lead.score || 0}/10</div>
+            <div className="flex items-center gap-3">
+              <span>🔥 {lead.score || 0}/10</span>
+              {signalsKnown && (
+                <RecalculateScoreButton leadId={lead.id} lead={lead} />
+              )}
+            </div>
           </div>
         </div>
 
@@ -115,6 +132,29 @@ export default async function LeadDetailPage({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Scoring signals breakdown */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5">
+        <div className="text-xs text-zinc-500 uppercase mb-3">Scoring signals</div>
+        {!signalsKnown ? (
+          <div className="text-sm text-zinc-500">
+            Signals not recorded — this lead was created before signal tracking was added.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {signals.map((s) => (
+              <div key={s.label} className="flex items-center justify-between text-sm">
+                <span className={s.value ? "text-zinc-200" : "text-zinc-500"}>
+                  {s.value ? "✓" : "✗"} {s.label}
+                </span>
+                <span className={`text-xs font-mono ${s.value ? "text-green-400" : "text-zinc-600"}`}>
+                  {s.value ? `+${s.points}` : `+0`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 🧠 Activity Timeline */}

@@ -6,7 +6,7 @@ const DEFAULT_FALLBACK_PROB = 0.1
 export async function calculatePredictivePipeline() {
   const { data: leads } = await supabase
     .from("leads")
-    .select("*")
+    .select("id, status, stage_changed_at, value, converted, stage_at_conversion")
 
   if (!leads || leads.length === 0) {
     return {

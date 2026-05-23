@@ -43,6 +43,11 @@ export default function NewLeadPage() {
         score,
         status: "New",
         stage_changed_at: ts,
+        // Persist signals so the score can be shown, explained, and recalculated
+        signal_warm_intro: warmIntro,
+        signal_outsourcing: outsourcing,
+        signal_uploads_weekly: uploadsWeekly,
+        signal_monetized: monetized,
       }])
       .select().single()
 

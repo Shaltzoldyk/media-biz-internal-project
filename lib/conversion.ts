@@ -36,6 +36,11 @@ export async function convertLeadToClient(leadId: string) {
   }
 
   // 3️⃣ Update Lead as Converted
+  // stage_at_conversion records which pipeline stage this lead was in at the
+  // moment of conversion. This is the correct input for the self-learning
+  // probability engine — not the lead's current status, which never changes
+  // after conversion and so tells you nothing about where in the funnel
+  // the deal was won.
   const conversionTimestamp = new Date().toISOString()
 
   const { error: updateError } = await supabase
@@ -44,6 +49,7 @@ export async function convertLeadToClient(leadId: string) {
       converted: true,
       converted_at: conversionTimestamp,
       client_id: client.id,
+      stage_at_conversion: lead.status,
     })
     .eq("id", lead.id)
 
