@@ -3,6 +3,7 @@
 import { useState } from "react"
 import Link from "next/link"
 import { supabase } from "@/lib/supabase"
+import { useCurrency } from "@/context/CurrencyContext"
 import type { Expense, ExpenseCategory } from "@/app/expenses/page"
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -25,11 +26,6 @@ const ALL_CATEGORIES = [
   "Other",
 ]
 
-function fmt(amount: number, currency: string) {
-  if (currency === "USD") return `$${Number(amount).toLocaleString("en-US", { minimumFractionDigits: 0 })}`
-  return `₹${Number(amount).toLocaleString("en-IN")}`
-}
-
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-IN", {
     day: "numeric", month: "short", year: "numeric",
@@ -37,6 +33,14 @@ function fmtDate(iso: string) {
 }
 
 export default function ExpensesTable({ initialExpenses }: { initialExpenses: Expense[] }) {
+  const { fmt, rate } = useCurrency()
+
+  // Expenses are stored in their original currency (INR or USD).
+  // fmt() expects INR, so convert USD-stored amounts to INR first using the
+  // live rate, then fmt() will convert back to USD if the toggle is on.
+  const fmtExpense = (amount: number, currency: string) =>
+    fmt(currency === "USD" ? amount * rate : amount)
+
   const [expenses,        setExpenses]       = useState<Expense[]>(initialExpenses)
   const [categoryFilter,  setCategoryFilter] = useState("")
   const [search,          setSearch]         = useState("")
@@ -44,7 +48,7 @@ export default function ExpensesTable({ initialExpenses }: { initialExpenses: Ex
 
   const handleDelete = async (id: string) => {
     const exp = expenses.find((e) => e.id === id)
-    if (!exp || !confirm(`Delete expense: ${exp.payee} (${fmt(exp.amount, exp.currency)})?`)) return
+    if (!exp || !confirm(`Delete expense: ${exp.payee} (${fmtExpense(exp.amount, exp.currency)})?`)) return
     setDeletingId(id)
     setExpenses((prev) => prev.filter((e) => e.id !== id))
     await supabase.from("expenses").delete().eq("id", id)
@@ -139,7 +143,7 @@ export default function ExpensesTable({ initialExpenses }: { initialExpenses: Ex
                   </span>
                 </td>
                 <td className="mono" style={{ textAlign: "right", fontWeight: 600, color: "var(--red)", whiteSpace: "nowrap" }}>
-                  {fmt(exp.amount, exp.currency)}
+                  {fmtExpense(exp.amount, exp.currency)}
                 </td>
                 <td>
                   <button
@@ -168,7 +172,7 @@ export default function ExpensesTable({ initialExpenses }: { initialExpenses: Ex
                   textAlign: "right", fontWeight: 700, color: "var(--red)",
                   padding: "10px 14px", borderTop: "1px solid var(--border)", whiteSpace: "nowrap",
                 }}>
-                  ₹{Math.round(filteredTotal).toLocaleString("en-IN")}
+                  {fmt(filteredTotal)}
                 </td>
                 <td style={{ borderTop: "1px solid var(--border)" }} />
               </tr>

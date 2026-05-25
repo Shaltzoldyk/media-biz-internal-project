@@ -36,9 +36,9 @@ export default function RevenueSection({ client }: { client: any }) {
   useEffect(() => { fetchRecords() }, [])
 
   const addPayment = async () => {
-    if (!amount) return
+    const amt = Number(amount)
+    if (!amount || isNaN(amt) || amt <= 0) return
     setAdding(true)
-    const amt  = Number(amount)
     const date = new Date().toISOString().split("T")[0]
     const { data, error } = await supabase
       .from("revenue_records")

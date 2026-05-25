@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase"
 import { notFound } from "next/navigation"
 import ActivityTimeline from "@/components/ActivityTimeline"
 import RevenueSection from "@/components/RevenueSection"
+import CurrencyValue from "@/components/CurrencyValue"
 
 export default async function ClientDetailPage({
   params,
@@ -21,47 +22,48 @@ export default async function ClientDetailPage({
   }
 
   return (
-    <div className="max-w-4xl space-y-8">
-      <div>
-        <h1 className="text-3xl font-semibold">
-          {client.name}
-        </h1>
-        <div className="text-zinc-400 mt-2">
-          {client.company || "No company"}
-        </div>
+    <div style={{ maxWidth: 720 }}>
+      <div className="page-header fade-up">
+        <div className="label">Client</div>
+        <h1>{client.name}</h1>
+        {client.company && (
+          <div style={{ color: "var(--text-3)", marginTop: 4, fontSize: "0.875rem" }}>
+            {client.company}
+          </div>
+        )}
       </div>
 
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 space-y-3">
-        <div>
-          <div className="text-xs text-zinc-500 uppercase">
-            Contract Value
+      <div className="fade-up delay-1 card" style={{ padding: "20px", marginBottom: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+          <div>
+            <div className="label" style={{ marginBottom: 4 }}>Contract value</div>
+            <div className="mono" style={{ fontWeight: 600 }}>
+              <CurrencyValue amount={client.contract_value} />
+            </div>
           </div>
           <div>
-            ₹ {Number(client.contract_value || 0).toLocaleString()}
+            <div className="label" style={{ marginBottom: 4 }}>Billing type</div>
+            <div>{client.billing_type}</div>
           </div>
-        </div>
-
-        <div>
-          <div className="text-xs text-zinc-500 uppercase">
-            Billing Type
+          <div>
+            <div className="label" style={{ marginBottom: 4 }}>Status</div>
+            <div>
+              <span className={`pill ${client.status === "active" ? "pill-green" : "pill-gray"}`}>
+                {client.status}
+              </span>
+            </div>
           </div>
-          <div>{client.billing_type}</div>
-        </div>
-
-        <div>
-          <div className="text-xs text-zinc-500 uppercase">
-            Status
-          </div>
-          <div>{client.status}</div>
         </div>
       </div>
 
-      <RevenueSection client={client} />
+      <div className="fade-up delay-2 card" style={{ padding: "20px", marginBottom: 20 }}>
+        <div className="label" style={{ marginBottom: 12 }}>Revenue</div>
+        <RevenueSection client={client} />
+      </div>
 
-      <ActivityTimeline
-        entityType="client"
-        entityId={client.id}
-      />
+      <div className="fade-up delay-3">
+        <ActivityTimeline entityType="client" entityId={client.id} />
+      </div>
     </div>
   )
 }

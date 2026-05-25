@@ -20,6 +20,7 @@ import { Lead } from "@/types/lead"
 import { getStageStatus } from "@/lib/stageVelocity"
 import { convertLeadToClient } from "@/lib/conversion"
 import { logActivity } from "@/lib/activity"
+import { useCurrency } from "@/context/CurrencyContext"
 
 const statuses = [
   "New",
@@ -37,6 +38,7 @@ export default function PipelineBoard({
   leads: Lead[]
 }) {
   const [leads, setLeads] = useState<Lead[]>(initialLeads)
+  const { fmt } = useCurrency()
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event
@@ -170,7 +172,7 @@ export default function PipelineBoard({
     <DndContext collisionDetection={closestCorners} onDragEnd={handleDragEnd}>
       <div className="w-full">
         <div className="mb-6 text-xl font-semibold">
-          Total Pipeline: ₹ {totalPipelineValue.toLocaleString()}
+          Total Pipeline: {fmt(totalPipelineValue)}
         </div>
 
         <div className="overflow-x-auto">
@@ -185,7 +187,7 @@ export default function PipelineBoard({
                       {column.status} ({column.count})
                     </h2>
                     <div className="text-xs text-zinc-500 mt-1">
-                      ₹ {column.totalValue.toLocaleString()}
+                      {fmt(column.totalValue)}
                     </div>
                   </div>
 
@@ -234,6 +236,7 @@ function DroppableColumn({
 function SortableLeadCard({ lead }: { lead: Lead }) {
   const { attributes, listeners, setNodeRef, transform, transition } =
     useSortable({ id: lead.id })
+  const { fmt } = useCurrency()
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -272,7 +275,7 @@ function SortableLeadCard({ lead }: { lead: Lead }) {
       </div>
 
       <div className="text-xs mt-1">
-        ₹ {lead.value ? Number(lead.value).toLocaleString() : "-"}
+        {fmt(lead.value)}
       </div>
     </div>
   )

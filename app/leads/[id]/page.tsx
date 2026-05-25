@@ -2,8 +2,8 @@ import { supabase } from "@/lib/supabase"
 import { notFound } from "next/navigation"
 import ActivityTimeline from "@/components/ActivityTimeline"
 import { getStageStatus } from "@/lib/stageVelocity"
-import { calculateLeadScore } from "@/lib/leadScore"
 import RecalculateScoreButton from "@/components/RecalculateScoreButton"
+import CurrencyValue from "@/components/CurrencyValue"
 
 export default async function LeadDetailPage({
   params,
@@ -77,10 +77,7 @@ export default async function LeadDetailPage({
               Deal Value
             </div>
             <div>
-              ₹{" "}
-              {lead.value
-                ? Number(lead.value).toLocaleString()
-                : "-"}
+              <CurrencyValue amount={lead.value} />
             </div>
           </div>
 

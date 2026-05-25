@@ -1,5 +1,6 @@
 import { calculatePipelineHealth } from "@/lib/pipelineHealthEngine"
 import { supabase } from "@/lib/supabase"
+import DismissAlert from "@/components/DismissAlert"
 
 export const dynamic = "force-dynamic"
 
@@ -8,10 +9,10 @@ const severityOrder: Record<string, number> = { critical: 3, high: 2, warning: 1
 export default async function Dashboard() {
   const [{ data: automations }, { data: healthSnap }, pipelineHealth, { data: phSnapshots }] =
     await Promise.all([
-      supabase.from("automations_log").select("*").eq("resolved", false),
-      supabase.from("system_health_snapshots").select("*").order("snapshot_date", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("automations_log").select("id, type, severity, created_at, entity_id, stage_name").eq("resolved", false),
+      supabase.from("system_health_snapshots").select("score, snapshot_date").order("snapshot_date", { ascending: false }).limit(1).maybeSingle(),
       calculatePipelineHealth(),
-      supabase.from("pipeline_health_snapshots").select("*").order("snapshot_date", { ascending: false }).limit(7),
+      supabase.from("pipeline_health_snapshots").select("score, snapshot_date").order("snapshot_date", { ascending: false }).limit(7),
     ])
 
   const alerts = (automations || [])
@@ -77,7 +78,7 @@ export default async function Dashboard() {
           ) : (
             <table>
               <thead>
-                <tr><th>Type</th><th>Severity</th><th>Triggered</th></tr>
+                <tr><th>Type</th><th>Severity</th><th>Triggered</th><th></th></tr>
               </thead>
               <tbody>
                 {alerts.map((a) => (
@@ -88,6 +89,9 @@ export default async function Dashboard() {
                       {new Date(a.created_at).toLocaleString("en-IN", {
                         day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
                       })}
+                    </td>
+                    <td>
+                      <DismissAlert id={a.id} />
                     </td>
                   </tr>
                 ))}

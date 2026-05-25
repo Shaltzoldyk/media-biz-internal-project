@@ -54,6 +54,10 @@ export async function convertLeadToClient(leadId: string) {
     .eq("id", lead.id)
 
   if (updateError) {
+    // Lead update failed — delete the client we just created so we don't
+    // leave an orphaned row. Re-attempting conversion would otherwise create
+    // a duplicate client (step 2 has no duplicate guard).
+    await supabase.from("clients").delete().eq("id", client.id)
     throw new Error(updateError.message)
   }
 

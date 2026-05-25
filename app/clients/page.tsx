@@ -1,5 +1,6 @@
 import { supabase } from "@/lib/supabase"
 import ClientCard from "@/components/ClientCard"
+import CurrencyValue from "@/components/CurrencyValue"
 
 export const dynamic = "force-dynamic"
 
@@ -64,19 +65,18 @@ export default async function ClientsPage() {
           <div className="val">{active.length}</div>
         </div>
         <div className="card stat">
-          <div className="label">Est. MRR (₹)</div>
+          <div className="label">Est. MRR</div>
           <div className="val" style={{ fontSize: "1.3rem" }}>
-            ₹{totalMRR.toLocaleString("en-IN")}
+            <CurrencyValue amount={totalMRR} />
           </div>
-          <div className="sub">stored in INR · toggle ₹/$ in sidebar</div>
         </div>
         <div className="card stat">
-          <div className="label">Outstanding (₹)</div>
+          <div className="label">Outstanding</div>
           <div className="val" style={{
             fontSize: "1.3rem",
             color: totalOutstanding > 0 ? "var(--red)" : "var(--green)",
           }}>
-            ₹{totalOutstanding.toLocaleString("en-IN")}
+            <CurrencyValue amount={totalOutstanding} />
           </div>
         </div>
       </div>

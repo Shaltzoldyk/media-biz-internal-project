@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { supabase } from "@/lib/supabase"
 import Link from "next/link"
+import { useCurrency } from "@/context/CurrencyContext"
 
 type Activity = {
   id: string
@@ -19,12 +20,7 @@ type Activity = {
    HELPERS
 ================================ */
 
-function formatCurrency(amount: any) {
-  if (!amount && amount !== 0) return ""
-  return `₹ ${Number(amount).toLocaleString()}`
-}
-
-function formatActivity(activity: Activity) {
+function formatActivity(activity: Activity, fmt: (n: number | null | undefined) => string) {
   // 🔥 If message exists (system_flag or future intelligent logs)
   if (activity.message) {
     return activity.message
@@ -48,15 +44,13 @@ function formatActivity(activity: Activity) {
         : "Client created from lead"
 
     case "contract_update":
-      return `Contract updated → ${formatCurrency(
-        meta.newValue
-      )} (${meta.newBilling || ""})`
+      return `Contract updated → ${fmt(meta.newValue)} (${meta.newBilling || ""})`
 
     case "payment_logged":
-      return `Payment logged → ${formatCurrency(meta.amount)}`
+      return `Payment logged → ${fmt(meta.amount)}`
 
     case "payment_deleted":
-      return `Payment deleted → ${formatCurrency(meta.amount)}`
+      return `Payment deleted → ${fmt(meta.amount)}`
 
     case "client_deleted":
       return `Client deleted — ${meta.name || ""}`
@@ -72,18 +66,12 @@ function formatActivity(activity: Activity) {
   }
 }
 
-function getSeverityStyles(
-  severity: Activity["severity"]
-) {
+function severityStyle(severity: Activity["severity"]): React.CSSProperties {
   switch (severity) {
-    case "critical":
-      return "bg-red-950 border-red-800"
-    case "high":
-      return "bg-yellow-950 border-yellow-800"
-    case "warning":
-      return "bg-orange-950 border-orange-800"
-    default:
-      return "bg-zinc-900 border-zinc-800"
+    case "critical": return { background: "var(--red-dim)",    border: "1px solid var(--red)" }
+    case "high":     return { background: "var(--amber-dim)",  border: "1px solid var(--amber)" }
+    case "warning":  return { background: "var(--amber-dim)",  border: "1px solid var(--amber)" }
+    default:         return { background: "var(--bg-1)",        border: "1px solid var(--border)" }
   }
 }
 
@@ -92,144 +80,94 @@ function getSeverityStyles(
 ================================ */
 
 export default function ActivityPage() {
-  const [activities, setActivities] =
-    useState<Activity[]>([])
-  const [entityFilter, setEntityFilter] =
-    useState("")
-  const [typeFilter, setTypeFilter] =
-    useState("")
-  const [search, setSearch] = useState("")
+  const { fmt } = useCurrency()
+  const [activities, setActivities]     = useState<Activity[]>([])
+  const [entityFilter, setEntityFilter] = useState("")
+  const [typeFilter,   setTypeFilter]   = useState("")
+  const [search,       setSearch]       = useState("")
 
   const fetchActivities = async () => {
     let query = supabase
       .from("activities")
       .select("*")
-      .order("created_at", {
-        ascending: false,
-      })
+      .order("created_at", { ascending: false })
       .limit(300)
 
-    if (entityFilter) {
-      query = query.eq(
-        "entity_type",
-        entityFilter
-      )
-    }
-
-    if (typeFilter) {
-      query = query.eq("type", typeFilter)
-    }
+    if (entityFilter) query = query.eq("entity_type", entityFilter)
+    if (typeFilter)   query = query.eq("type", typeFilter)
 
     const { data } = await query
     setActivities(data || [])
   }
 
-  useEffect(() => {
-    fetchActivities()
-  }, [entityFilter, typeFilter])
+  useEffect(() => { fetchActivities() }, [entityFilter, typeFilter])
 
-  const filtered = activities.filter(
-    (a) => {
-      if (!search) return true
-
-      const lower =
-        search.toLowerCase()
-
-      return (
-        a.entity_id
-          .toLowerCase()
-          .includes(lower) ||
-        formatActivity(a)
-          .toLowerCase()
-          .includes(lower)
-      )
-    }
-  )
+  const filtered = activities.filter((a) => {
+    if (!search) return true
+    const lower = search.toLowerCase()
+    return (
+      a.entity_id.toLowerCase().includes(lower) ||
+      formatActivity(a, fmt).toLowerCase().includes(lower)
+    )
+  })
 
   return (
-    <div className="max-w-6xl space-y-6">
-      <h1 className="text-3xl font-semibold">
-        Activity Log
-      </h1>
+    <div>
+      <div className="page-header fade-up">
+        <div className="label">Log</div>
+        <h1>Activity</h1>
+      </div>
 
       {/* Filters */}
-      <div className="flex gap-4 flex-wrap">
-        <select
-          value={entityFilter}
-          onChange={(e) =>
-            setEntityFilter(e.target.value)
-          }
-          className="bg-zinc-800 p-2 rounded"
-        >
-          <option value="">
-            All Entities
-          </option>
-          <option value="lead">
-            Lead
-          </option>
-          <option value="client">
-            Client
-          </option>
+      <div className="fade-up delay-1" style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
+        <select value={entityFilter} onChange={(e) => setEntityFilter(e.target.value)} style={{ width: 140 }}>
+          <option value="">All entities</option>
+          <option value="lead">Lead</option>
+          <option value="client">Client</option>
         </select>
-
         <input
-          placeholder="Filter by type..."
+          placeholder="Filter by type…"
           value={typeFilter}
-          onChange={(e) =>
-            setTypeFilter(e.target.value)
-          }
-          className="bg-zinc-800 p-2 rounded"
+          onChange={(e) => setTypeFilter(e.target.value)}
+          style={{ width: 160 }}
         />
-
         <input
-          placeholder="Search activity..."
+          placeholder="Search activity…"
           value={search}
-          onChange={(e) =>
-            setSearch(e.target.value)
-          }
-          className="bg-zinc-800 p-2 rounded flex-1"
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, minWidth: 160 }}
         />
       </div>
 
-      {/* Activity Feed */}
-      <div className="space-y-3">
+      {/* Feed */}
+      <div className="fade-up delay-2" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {filtered.map((activity) => {
-          const entityLink =
-            activity.entity_type ===
-            "lead"
-              ? `/leads/${activity.entity_id}`
-              : `/clients/${activity.entity_id}`
+          const entityLink = activity.entity_type === "lead"
+            ? `/leads/${activity.entity_id}`
+            : `/clients/${activity.entity_id}`
 
           return (
             <div
               key={activity.id}
-              className={`border rounded-xl p-4 ${getSeverityStyles(
-                activity.severity
-              )}`}
+              style={{
+                ...severityStyle(activity.severity),
+                borderRadius: "var(--radius)",
+                padding: "12px 14px",
+              }}
             >
-              <div className="flex justify-between">
-                <div className="text-sm font-medium">
-                  {formatActivity(
-                    activity
-                  )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                <div style={{ fontSize: "0.875rem", fontWeight: 500, color: "var(--text)" }}>
+                  {formatActivity(activity, fmt)}
                 </div>
-
-                <div className="text-xs text-zinc-500">
-                  {new Date(
-                    activity.created_at
-                  ).toLocaleString()}
+                <div className="mono" style={{ fontSize: "0.72rem", color: "var(--text-3)", flexShrink: 0 }}>
+                  {new Date(activity.created_at).toLocaleString("en-IN", {
+                    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                  })}
                 </div>
               </div>
-
-              <div className="text-xs mt-2">
-                <Link
-                  href={entityLink}
-                  className="text-blue-400 hover:underline"
-                >
-                  View{" "}
-                  {
-                    activity.entity_type
-                  }
+              <div style={{ marginTop: 6, fontSize: "0.72rem" }}>
+                <Link href={entityLink} style={{ color: "var(--accent)" }}>
+                  View {activity.entity_type}
                 </Link>
               </div>
             </div>
@@ -237,7 +175,7 @@ export default function ActivityPage() {
         })}
 
         {filtered.length === 0 && (
-          <div className="text-zinc-500 text-sm">
+          <div style={{ color: "var(--text-3)", fontSize: "0.875rem", padding: "32px 0", textAlign: "center" }}>
             No activity found.
           </div>
         )}
