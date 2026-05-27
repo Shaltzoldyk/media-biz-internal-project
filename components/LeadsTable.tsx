@@ -8,7 +8,7 @@ import { Lead } from "@/types/lead"
 import { logActivity } from "@/lib/activity"
 import { useCurrency } from "@/context/CurrencyContext"
 
-const STATUS_OPTIONS = ["New","Qualified","Contacted","Responded","Call Booked","Client","Lost"]
+const STATUS_OPTIONS = ["New","Outreach","Qualified","Contacted","Responded","Call Booked","Client","Lost"]
 
 export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
   const [leads, setLeads]         = useState<Lead[]>(initialLeads)

@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase"
 import { calculateLeadAgingDistribution } from "@/lib/leadAgingEngine"
 import { getAdaptiveRevenueDropThreshold } from "@/lib/adaptiveThresholdEngine"
 import { getAdaptiveStageThreshold } from "@/lib/adaptivePipelineThresholdEngine"
+import { handleStalledOutreachLeads, resolveOutreachAlerts } from "@/lib/outreachAutomation"
 import type { LeadRow, RevenueRow } from "@/lib/intelligenceRunner"
 
 const HIGH_VALUE_THRESHOLD  = 5000
@@ -29,6 +30,8 @@ export async function runAutomationCycle(
     handleStageBottlenecks(leads),
     handleAgingRisk(leads),
     escalateUnresolvedAutomations(),
+    handleStalledOutreachLeads(leads),  // NEW: flag Outreach leads with no email sent
+    resolveOutreachAlerts(),            // NEW: auto-resolve when email is sent
   ])
 }
 

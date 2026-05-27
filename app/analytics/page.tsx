@@ -2,17 +2,25 @@ import { calculateRevenueForecast } from "@/lib/forecastEngine"
 import { calculatePredictivePipeline } from "@/lib/predictiveLeadEngine"
 import { calculateLeadAgingDistribution } from "@/lib/leadAgingEngine"
 import { runMonteCarloForecast } from "@/lib/monteCarloForecastEngine"
+import { supabase } from "@/lib/supabase"
 import AnalyticsView from "@/components/AnalyticsView"
 
 export const dynamic = "force-dynamic"
 
 export default async function AnalyticsPage() {
-  const [forecast, pipeline, aging, simulation] = await Promise.all([
-    calculateRevenueForecast(),
-    calculatePredictivePipeline(),
-    calculateLeadAgingDistribution(),
-    runMonteCarloForecast(),
-  ])
+  const [forecast, pipeline, aging, simulation, { data: outreachRows }, { data: convertedLeads }] =
+    await Promise.all([
+      calculateRevenueForecast(),
+      calculatePredictivePipeline(),
+      calculateLeadAgingDistribution(),
+      runMonteCarloForecast(),
+      supabase.from("outreach_log").select("status, lead_id"),
+      supabase
+        .from("leads")
+        .select("id, converted")
+        .eq("platform", "YouTube")
+        .eq("converted", true),
+    ])
 
   let bottleneck: string | null = null
   let lowestProb = Infinity
@@ -22,6 +30,13 @@ export default async function AnalyticsPage() {
       bottleneck = stage
     }
   }
+
+  // Outreach performance stats
+  const logs           = outreachRows ?? []
+  const totalContacted = logs.filter((r) => r.status === "sent" || r.status === "replied").length
+  const totalReplied   = logs.filter((r) => r.status === "replied").length
+  const replyRate      = totalContacted > 0 ? totalReplied / totalContacted : 0
+  const converted      = (convertedLeads ?? []).length
 
   return (
     <div>
@@ -42,6 +57,7 @@ export default async function AnalyticsPage() {
           structuralRiskScore: (aging as any).structuralRiskScore,
         }}
         bottleneck={bottleneck}
+        outreach={{ totalContacted, totalReplied, replyRate, converted }}
       />
     </div>
   )

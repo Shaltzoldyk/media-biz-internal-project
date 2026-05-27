@@ -4,6 +4,7 @@ import ActivityTimeline from "@/components/ActivityTimeline"
 import { getStageStatus } from "@/lib/stageVelocity"
 import RecalculateScoreButton from "@/components/RecalculateScoreButton"
 import CurrencyValue from "@/components/CurrencyValue"
+import LeadOutreachSection from "@/components/LeadOutreachSection"
 
 export default async function LeadDetailPage({
   params,
@@ -12,11 +13,14 @@ export default async function LeadDetailPage({
 }) {
   const { id } = await params
 
-  const { data: lead, error } = await supabase
-    .from("leads")
-    .select("*")
-    .eq("id", id)
-    .single()
+  const [{ data: lead, error }, { data: outreachLogs }] = await Promise.all([
+    supabase.from("leads").select("*").eq("id", id).single(),
+    supabase
+      .from("outreach_log")
+      .select("id, email_address, subject, status, sent_at, replied_at, video_title")
+      .eq("lead_id", id)
+      .order("created_at", { ascending: false }),
+  ])
 
   if (error || !lead) {
     return notFound()
@@ -153,6 +157,16 @@ export default async function LeadDetailPage({
           </div>
         )}
       </div>
+
+      {/* Outreach section — only shown for YT-sourced leads */}
+      {lead.platform === "YouTube" && (
+        <LeadOutreachSection
+          leadId={lead.id}
+          channelUrl={lead.yt_channel_url ?? null}
+          uploads30d={lead.yt_uploads_30d ?? 0}
+          logs={outreachLogs ?? []}
+        />
+      )}
 
       {/* 🧠 Activity Timeline */}
       <ActivityTimeline

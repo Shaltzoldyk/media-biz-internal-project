@@ -15,6 +15,8 @@ export type ActivityType =
   | "lead_created"
   | "client_deleted"
   | "system_flag"
+  | "outreach_sent"
+  | "outreach_replied"
 
 export type ActivitySeverity =
   | "warning"

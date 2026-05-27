@@ -56,9 +56,10 @@ export default async function TodayPage() {
     : healthScore >= 50 ? "var(--amber)" : "var(--red)"
 
   // Feeds derived directly from open alerts
-  const stalledAlerts = alerts.filter((a) => a.type === "stalled_high_value_lead")
-  const revenueAlerts = alerts.filter((a) => a.type === "revenue_drop")
+  const stalledAlerts   = alerts.filter((a) => a.type === "stalled_high_value_lead")
+  const revenueAlerts   = alerts.filter((a) => a.type === "revenue_drop")
   const bottleneckAlerts = alerts.filter((a) => a.type === "stage_bottleneck")
+  const outreachAlerts  = alerts.filter((a) => a.type === "outreach_not_sent")
 
   // These still need lead data (follow-up dates, scores — not in automations_log)
   const dueToday = leads.filter((l) => l.follow_up_date === todayStr)
@@ -131,6 +132,19 @@ export default async function TodayPage() {
             right: a.severity,
             dot: "dot-amber",
           }))} />
+
+        <Feed label="Outreach due" empty="No outreach alerts."
+          items={outreachAlerts.map((a) => {
+            const lead = a.entity_id ? leadMap.get(a.entity_id) : null
+            return {
+              id:    a.id,
+              href:  lead ? `/leads/${a.entity_id}` : "/outreach",
+              title: lead?.name ?? "Unknown lead",
+              sub:   "no email sent",
+              right: a.severity,
+              dot:   "dot-amber",
+            }
+          })} />
 
         {revenueAlerts.length > 0 && (
           <div style={{ gridColumn: "1 / -1" }}>

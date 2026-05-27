@@ -21,11 +21,17 @@ export type Lead = {
   signal_uploads_weekly?: boolean | null
   signal_monetized?: boolean | null
 
-  // 🔥 Phase 3 — Conversion fields
+  // Phase 3 — Conversion fields
   converted?: boolean | null
   converted_at?: string | null
   client_id?: string | null
   stage_at_conversion?: string | null
+
+  // YT outreach — only populated for leads sourced from YT discovery
+  yt_channel_url?: string | null
+  yt_avg_views?: number | null
+  yt_uploads_30d?: number | null
+  yt_score?: number | null
 
   created_at: string
 }

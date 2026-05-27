@@ -20,9 +20,15 @@ type Props = {
   }
   aging: { buckets: Record<string, number>; structuralRiskScore?: number }
   bottleneck: string | null
+  outreach: {
+    totalContacted: number
+    totalReplied:   number
+    replyRate:      number
+    converted:      number
+  }
 }
 
-export default function AnalyticsView({ forecast, simulation, pipeline, aging, bottleneck }: Props) {
+export default function AnalyticsView({ forecast, simulation, pipeline, aging, bottleneck, outreach }: Props) {
   const { fmt, fmtCompact } = useCurrency()
 
   const probPill = (p: number) =>
@@ -166,6 +172,24 @@ export default function AnalyticsView({ forecast, simulation, pipeline, aging, b
             </span>
           </div>
         )}
+      </div>
+
+      {/* Outreach performance */}
+      <div className="fade-up delay-5" style={{ marginBottom: 28 }}>
+        <div className="label" style={{ marginBottom: 10 }}>Outreach performance</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>
+          {[
+            { label: "Contacted",  val: String(outreach.totalContacted) },
+            { label: "Replied",    val: String(outreach.totalReplied) },
+            { label: "Reply rate", val: `${(outreach.replyRate * 100).toFixed(1)}%` },
+            { label: "Converted",  val: String(outreach.converted) },
+          ].map((s) => (
+            <div key={s.label} className="card stat">
+              <div className="label">{s.label}</div>
+              <div className="val" style={{ fontSize: "1.3rem" }}>{s.val}</div>
+            </div>
+          ))}
+        </div>
       </div>
     </>
   )

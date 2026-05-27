@@ -24,6 +24,7 @@ import { useCurrency } from "@/context/CurrencyContext"
 
 const statuses = [
   "New",
+  "Outreach",    // YT-sourced leads land here; automation watches for stall
   "Qualified",
   "Contacted",
   "Responded",

@@ -13,6 +13,7 @@ const nav = [
   { group: "Pipeline", items: [
     { name: "Leads",    href: "/leads" },
     { name: "Pipeline", href: "/pipeline" },
+    { name: "Outreach", href: "/outreach" },
   ]},
   { group: "Revenue", items: [
     { name: "Clients",       href: "/clients" },

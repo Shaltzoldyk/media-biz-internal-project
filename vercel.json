@@ -3,6 +3,10 @@
     {
       "path": "/api/intelligence/run",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/outreach/sync",
+      "schedule": "0 */6 * * *"
     }
   ]
 }
