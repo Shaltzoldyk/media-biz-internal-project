@@ -1,8 +1,15 @@
-import { supabase } from "@/lib/supabase"
+// lib/automationActions.ts
+//
+// Called by DismissAlert and ResolveAlertButton ("use client" components).
+// Must NEVER import server-only modules (supabase, supabaseServer).
+// Delegates the DB write to /api/alerts/[id]/resolve so the service role
+// key stays server-side.
 
 export async function resolveAutomation(id: string) {
-  await supabase
-    .from("automations_log")
-    .update({ resolved: true, resolved_at: new Date().toISOString() })
-    .eq("id", id)
+  const res = await fetch(`/api/alerts/${id}/resolve`, { method: "POST" })
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    console.error("Failed to resolve automation:", body.error ?? res.status)
+  }
 }

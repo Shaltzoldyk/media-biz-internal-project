@@ -1,4 +1,5 @@
 // lib/intelligenceRunner.ts
+import { runPipelineHealthSnapshot } from "./pipelineHealthSnapshotEngine"
 import { supabaseServer as supabase } from "@/lib/supabaseServer"
 import {
   detectStuckLeads,
@@ -247,23 +248,3 @@ async function runSystemHealthSnapshot(
    calculatePipelineHealth() live on every page render. The cron
    writes once per day; the page is a pure read.
 ================================ */
-
-async function runPipelineHealthSnapshot() {
-  const todayStr = new Date().toISOString().split("T")[0]
-
-  const { data: existing } = await supabase
-    .from("pipeline_health_snapshots")
-    .select("id")
-    .eq("snapshot_date", todayStr)
-    .limit(1)
-
-  // Already written today — nothing to do
-  if (existing && existing.length > 0) return
-
-  const { score } = await calculatePipelineHealth()
-
-  await supabase.from("pipeline_health_snapshots").insert({
-    score,
-    snapshot_date: todayStr,
-  })
-}
