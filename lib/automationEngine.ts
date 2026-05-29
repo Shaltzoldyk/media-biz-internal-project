@@ -1,27 +1,25 @@
-import { supabase } from "@/lib/supabase"
+// lib/automationEngine.ts
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
 import { calculateLeadAgingDistribution } from "@/lib/leadAgingEngine"
 import { getAdaptiveRevenueDropThreshold } from "@/lib/adaptiveThresholdEngine"
 import { getAdaptiveStageThreshold } from "@/lib/adaptivePipelineThresholdEngine"
 import { handleStalledOutreachLeads, resolveOutreachAlerts } from "@/lib/outreachAutomation"
 import type { LeadRow, RevenueRow } from "@/lib/intelligenceRunner"
 
-const HIGH_VALUE_THRESHOLD  = 5000
+const HIGH_VALUE_THRESHOLD   = 5000
 const STALLED_DAYS_THRESHOLD = 5
 const ESCALATION_DAYS        = 3
 const MIN_STAGE_SAMPLE_SIZE  = 5
+const AGING_RISK_THRESHOLD   = 0.35
 
 /* ================================
    PUBLIC RUNNER
-   P-4: all 5 handlers run in parallel with Promise.all
 ================================ */
 
 export async function runAutomationCycle(
   leads:   LeadRow[],
   revenue: RevenueRow[]
 ) {
-  // Run resolution pass first so that health scores and escalation logic
-  // operate on a clean set of open alerts — not ones whose underlying
-  // condition has already cleared.
   await resolveStaleAutomations(leads, revenue)
 
   await Promise.all([
@@ -30,16 +28,15 @@ export async function runAutomationCycle(
     handleStageBottlenecks(leads),
     handleAgingRisk(leads),
     escalateUnresolvedAutomations(),
-    handleStalledOutreachLeads(leads),  // NEW: flag Outreach leads with no email sent
-    resolveOutreachAlerts(),            // NEW: auto-resolve when email is sent
+    handleStalledOutreachLeads(leads),
+    resolveOutreachAlerts(),
   ])
 }
 
 /* ================================
    RESOLUTION PASS
-   Closes alerts whose underlying condition has cleared.
-   Runs before the detection jobs so escalation never
-   promotes an alert that should already be resolved.
+   FIX: use revenue_date (actual payment date) not created_at
+   (row insertion date) when checking if revenue drop still holds.
 ================================ */
 
 async function resolveStaleAutomations(leads: LeadRow[], revenue: RevenueRow[]) {
@@ -52,7 +49,6 @@ async function resolveStaleAutomations(leads: LeadRow[], revenue: RevenueRow[]) 
 
   const now = new Date()
 
-  // Build fast-lookup sets from current data
   const stalledHighValueIds = new Set(
     leads
       .filter((lead) => {
@@ -66,18 +62,17 @@ async function resolveStaleAutomations(leads: LeadRow[], revenue: RevenueRow[]) 
       .map((l) => l.id)
   )
 
-  // Check if revenue drop condition still holds
   let revenueDropStillActive = false
   if (revenue.length > 0) {
     const sevenDaysAgo    = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000)
     const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
     let current = 0, previous = 0
     for (const r of revenue) {
-      if (!r.created_at) continue
-      const created = new Date(r.created_at)
-      const amount  = Number(r.amount || 0)
-      if (created >= sevenDaysAgo)    current  += amount
-      else if (created >= fourteenDaysAgo) previous += amount
+      if (!r.revenue_date) continue
+      const paymentDate = new Date(r.revenue_date)   // ← revenue_date, not created_at
+      const amount      = Number(r.amount || 0)
+      if (paymentDate >= sevenDaysAgo)         current  += amount
+      else if (paymentDate >= fourteenDaysAgo) previous += amount
     }
     if (previous > 0) {
       const drop      = (previous - current) / previous
@@ -92,23 +87,12 @@ async function resolveStaleAutomations(leads: LeadRow[], revenue: RevenueRow[]) 
     let shouldResolve = false
 
     if (alert.type === "stalled_high_value_lead") {
-      // Resolve if lead has since moved stage (no longer in stalled set)
-      shouldResolve = alert.entity_id
-        ? !stalledHighValueIds.has(alert.entity_id)
-        : false
+      shouldResolve = alert.entity_id ? !stalledHighValueIds.has(alert.entity_id) : false
     } else if (alert.type === "revenue_drop") {
       shouldResolve = !revenueDropStillActive
-    }
-    // stage_bottleneck and aging_risk are recalculated each cycle;
-    // resolve them if they're older than 24 hours and no new one was inserted
-    // (the dedup check in the handler means a new one only appears if still triggered)
-    else if (
-      alert.type === "stage_bottleneck" ||
-      alert.type === "aging_risk"
-    ) {
+    } else if (alert.type === "stage_bottleneck" || alert.type === "aging_risk") {
       const ageHours =
-        (now.getTime() - new Date(alert.created_at).getTime()) /
-        (1000 * 60 * 60)
+        (now.getTime() - new Date(alert.created_at).getTime()) / (1000 * 60 * 60)
       shouldResolve = ageHours >= 24
     }
 
@@ -125,7 +109,6 @@ async function resolveStaleAutomations(leads: LeadRow[], revenue: RevenueRow[]) 
 
 /* ================================
    STALLED HIGH VALUE LEADS
-   P-1: receives pre-fetched leads (no DB call)
 ================================ */
 
 async function handleStalledHighValueLeads(leads: LeadRow[]) {
@@ -142,7 +125,6 @@ async function handleStalledHighValueLeads(leads: LeadRow[]) {
 
   if (stalled.length === 0) return
 
-  // Check existing open alerts in one query
   const { data: existing } = await supabase
     .from("automations_log")
     .select("entity_id")
@@ -154,31 +136,32 @@ async function handleStalledHighValueLeads(leads: LeadRow[]) {
 
   const jobs = stalled
     .filter((lead) => !alreadyFlagged.has(lead.id))
-    .map(async (lead) => {
+    .map((lead) => {
       const diffDays =
         (now.getTime() - new Date(lead.stage_changed_at!).getTime()) /
         (1000 * 60 * 60 * 24)
 
-      await supabase.from("automations_log").insert({
-        type:        "stalled_high_value_lead",
-        entity_type: "lead",
-        entity_id:   lead.id,
-        severity:    "high",
-      })
-
-      await supabase.from("activities").insert({
-        entity_type: "lead",
-        entity_id:   lead.id,
-        type:        "system_flag",
-        message:     `High-value lead stalled for ${Math.floor(diffDays)} days.`,
-        severity:    "high",
-        metadata: {
-          daysInStage: Math.floor(diffDays),
-          threshold:   STALLED_DAYS_THRESHOLD,
-          value:       lead.value,
-        },
-        created_at: new Date().toISOString(),
-      })
+      return Promise.all([
+        supabase.from("automations_log").insert({
+          type:        "stalled_high_value_lead",
+          entity_type: "lead",
+          entity_id:   lead.id,
+          severity:    "high",
+        }),
+        supabase.from("activities").insert({
+          entity_type: "lead",
+          entity_id:   lead.id,
+          type:        "system_flag",
+          message:     `High-value lead stalled for ${Math.floor(diffDays)} days.`,
+          severity:    "high",
+          metadata: {
+            daysInStage: Math.floor(diffDays),
+            threshold:   STALLED_DAYS_THRESHOLD,
+            value:       lead.value,
+          },
+          created_at: new Date().toISOString(),
+        }),
+      ])
     })
 
   await Promise.all(jobs)
@@ -186,33 +169,30 @@ async function handleStalledHighValueLeads(leads: LeadRow[]) {
 
 /* ================================
    REVENUE DROP DETECTION (Adaptive)
-   P-1: receives pre-fetched revenue (no DB call)
+   FIX: use revenue_date (actual payment date) not created_at.
 ================================ */
 
 async function handleRevenueDropDetection(revenue: RevenueRow[]) {
   if (!revenue || revenue.length === 0) return
 
-  const now            = new Date()
-  const sevenDaysAgo   = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000)
+  const now             = new Date()
+  const sevenDaysAgo    = new Date(now.getTime() - 7  * 24 * 60 * 60 * 1000)
   const fourteenDaysAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000)
 
   let currentWindow  = 0
   let previousWindow = 0
 
   for (const record of revenue) {
-    if (!record.created_at) continue
-    const created = new Date(record.created_at)
-    const amount  = Number(record.amount || 0)
-    if (created >= sevenDaysAgo) {
-      currentWindow += amount
-    } else if (created >= fourteenDaysAgo) {
-      previousWindow += amount
-    }
+    if (!record.revenue_date) continue
+    const paymentDate = new Date(record.revenue_date)  // ← revenue_date, not created_at
+    const amount      = Number(record.amount || 0)
+    if (paymentDate >= sevenDaysAgo)         currentWindow  += amount
+    else if (paymentDate >= fourteenDaysAgo) previousWindow += amount
   }
 
   if (previousWindow === 0) return
 
-  const percentDrop = (previousWindow - currentWindow) / previousWindow
+  const percentDrop       = (previousWindow - currentWindow) / previousWindow
   const adaptiveThreshold = await getAdaptiveRevenueDropThreshold(revenue)
 
   if (percentDrop <= adaptiveThreshold) return
@@ -241,15 +221,14 @@ async function handleRevenueDropDetection(revenue: RevenueRow[]) {
       type:        "system_flag",
       message:     `Revenue dropped ${Math.round(percentDrop * 100)}% compared to previous 7 days.`,
       severity,
-      metadata: { currentWindow, previousWindow, percentDrop, adaptiveThreshold },
-      created_at: new Date().toISOString(),
+      metadata:    { currentWindow, previousWindow, percentDrop, adaptiveThreshold },
+      created_at:  new Date().toISOString(),
     }),
   ])
 }
 
 /* ================================
    STAGE BOTTLENECK DETECTION (Adaptive)
-   P-1: receives pre-fetched leads (no DB call)
 ================================ */
 
 async function handleStageBottlenecks(leads: LeadRow[]) {
@@ -276,9 +255,7 @@ async function handleStageBottlenecks(leads: LeadRow[]) {
 
   for (const stage of nonTerminalStages) {
     stageConversions[stage] =
-      totalActive > 0
-        ? totalConverted * (stageTotals[stage] / totalActive)
-        : 0
+      totalActive > 0 ? totalConverted * (stageTotals[stage] / totalActive) : 0
   }
 
   const bottleneckStages = nonTerminalStages.filter((stage) => {
@@ -290,7 +267,6 @@ async function handleStageBottlenecks(leads: LeadRow[]) {
 
   if (bottleneckStages.length === 0) return
 
-  // Check existing open alerts for all bottleneck stages in one query
   const { data: existing } = await supabase
     .from("automations_log")
     .select("stage_name")
@@ -303,11 +279,11 @@ async function handleStageBottlenecks(leads: LeadRow[]) {
 
   const jobs = bottleneckStages
     .filter((stage) => !alreadyFlagged.has(stage))
-    .map(async (stage) => {
+    .map((stage) => {
       const total = stageTotals[stage]
       const rate  = (stageConversions[stage] || 0) / total
 
-      await Promise.all([
+      return Promise.all([
         supabase.from("automations_log").insert({
           type:        "stage_bottleneck",
           entity_type: "system",
@@ -331,16 +307,14 @@ async function handleStageBottlenecks(leads: LeadRow[]) {
 }
 
 /* ================================
-   AGING RISK DETECTION (Adaptive)
-   P-1: receives pre-fetched leads (no DB call)
+   AGING RISK DETECTION
 ================================ */
 
 async function handleAgingRisk(leads: LeadRow[]) {
   const aging = await calculateLeadAgingDistribution(leads)
   if (!aging || aging.structuralRiskScore === undefined) return
 
-  const adaptiveAgingThreshold = 0.25 + aging.structuralRiskScore * 0.3
-  if (aging.structuralRiskScore < adaptiveAgingThreshold) return
+  if (aging.structuralRiskScore < AGING_RISK_THRESHOLD) return
 
   const { data: existing } = await supabase
     .from("automations_log")
@@ -365,9 +339,9 @@ async function handleAgingRisk(leads: LeadRow[]) {
       message:     "Structural aging risk detected in pipeline.",
       severity:    "high",
       metadata: {
-        buckets:              aging.buckets,
-        structuralRiskScore:  aging.structuralRiskScore,
-        adaptiveAgingThreshold,
+        buckets:             aging.buckets,
+        structuralRiskScore: aging.structuralRiskScore,
+        threshold:           AGING_RISK_THRESHOLD,
       },
       created_at: new Date().toISOString(),
     }),
@@ -376,7 +350,6 @@ async function handleAgingRisk(leads: LeadRow[]) {
 
 /* ================================
    ESCALATION ENGINE
-   P-5: group by target severity, 2 batch updates max
 ================================ */
 
 async function escalateUnresolvedAutomations() {
@@ -389,8 +362,8 @@ async function escalateUnresolvedAutomations() {
 
   const now = new Date()
 
-  const toHigh:     string[] = []
-  const toCritical: string[] = []
+  const toHigh:          string[] = []
+  const toCritical:      string[] = []
   const activityInserts: object[] = []
 
   for (const automation of openAutomations) {
@@ -404,7 +377,6 @@ async function escalateUnresolvedAutomations() {
     if (diffDays < ESCALATION_DAYS) continue
 
     const newSeverity = automation.severity === "high" ? "critical" : "high"
-
     if (newSeverity === "critical") toCritical.push(automation.id)
     else                            toHigh.push(automation.id)
 
@@ -414,15 +386,14 @@ async function escalateUnresolvedAutomations() {
       type:        "system_flag",
       message:     `Automation escalated to ${newSeverity}.`,
       severity:    newSeverity,
-      metadata:    {
-        escalatedFrom:       automation.severity,
-        escalatedAfterDays:  Math.floor(diffDays),
+      metadata: {
+        escalatedFrom:      automation.severity,
+        escalatedAfterDays: Math.floor(diffDays),
       },
       created_at: new Date().toISOString(),
     })
   }
 
-  // 2 batch updates max regardless of how many automations need escalating
   await Promise.all([
     toCritical.length > 0
       ? supabase.from("automations_log").update({ severity: "critical" }).in("id", toCritical)

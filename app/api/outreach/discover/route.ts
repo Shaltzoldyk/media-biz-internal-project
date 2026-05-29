@@ -1,15 +1,19 @@
 // app/api/outreach/discover/route.ts
 //
-// POST — runs YT discovery and returns candidates.
+// POST — runs YT discovery and returns ranked lead candidates.
 // Also inserts a row into yt_discovery_runs for audit/history.
 
 import { NextRequest, NextResponse } from "next/server"
 import { discoverYTLeads } from "@/lib/ytDiscovery"
-import { supabase } from "@/lib/supabase"
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
+import { requireCronAuth } from "@/lib/apiAuth"
 
 export const dynamic = "force-dynamic"
 
 export async function POST(req: NextRequest) {
+  const authError = requireCronAuth(req)
+  if (authError) return authError
+
   let body: any
   try {
     body = await req.json()
@@ -35,14 +39,14 @@ export async function POST(req: NextRequest) {
       minAvgViews:   minAvgViews ? Number(minAvgViews) : undefined,
     })
 
-    // Log the run — non-blocking, don't fail the request if this errors
-    await supabase.from("yt_discovery_runs").insert({
+    // Log the run for audit history — non-blocking, don't fail the request if this errors
+    supabase.from("yt_discovery_runs").insert({
       keyword,
-      min_subs:       Number(minSubs),
-      max_subs:       Number(maxSubs),
-      min_uploads:    Number(minUploads30d),
-      min_avg_views:  minAvgViews ? Number(minAvgViews) : null,
-      leads_found:    leads.length,
+      min_subs:      Number(minSubs),
+      max_subs:      Number(maxSubs),
+      min_uploads:   Number(minUploads30d),
+      min_avg_views: minAvgViews ? Number(minAvgViews) : null,
+      leads_found:   leads.length,
     }).then(() => {})
 
     return NextResponse.json({ ok: true, leads })

@@ -1,4 +1,14 @@
-import { calculatePipelineHealth } from "@/lib/pipelineHealthEngine"
+// app/page.tsx
+//
+// Dashboard — reads from pre-computed snapshots only.
+//
+// FIX: previously called calculatePipelineHealth() live on every render,
+// which triggered two Supabase reads + predictive pipeline calculation
+// on every page hit. Pipeline health is now read from pipeline_health_snapshots,
+// written once per day by the cron via runPipelineHealthSnapshot().
+//
+// This page now makes exactly 3 Supabase reads total, all in parallel.
+
 import { supabase } from "@/lib/supabase"
 import DismissAlert from "@/components/DismissAlert"
 
@@ -7,31 +17,48 @@ export const dynamic = "force-dynamic"
 const severityOrder: Record<string, number> = { critical: 3, high: 2, warning: 1 }
 
 export default async function Dashboard() {
-  const [{ data: automations }, { data: healthSnap }, pipelineHealth, { data: phSnapshots }] =
+  const [{ data: automations }, { data: healthSnap }, { data: phSnapshots }] =
     await Promise.all([
-      supabase.from("automations_log").select("id, type, severity, created_at, entity_id, stage_name").eq("resolved", false),
-      supabase.from("system_health_snapshots").select("score, snapshot_date").order("snapshot_date", { ascending: false }).limit(1).maybeSingle(),
-      calculatePipelineHealth(),
-      supabase.from("pipeline_health_snapshots").select("score, snapshot_date").order("snapshot_date", { ascending: false }).limit(7),
+      supabase
+        .from("automations_log")
+        .select("id, type, severity, created_at, entity_id, stage_name")
+        .eq("resolved", false),
+      supabase
+        .from("system_health_snapshots")
+        .select("score, snapshot_date")
+        .order("snapshot_date", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      supabase
+        .from("pipeline_health_snapshots")
+        .select("score, snapshot_date")
+        .order("snapshot_date", { ascending: false })
+        .limit(7),
     ])
 
   const alerts = (automations || [])
     .sort((a, b) => severityOrder[b.severity] - severityOrder[a.severity])
     .slice(0, 5)
 
-  const healthScore = healthSnap?.score ?? null
+  const healthScore    = healthSnap?.score ?? null
+  // Most recent snapshot score — written by cron, never recalculated here
+  const pipelineScore  = phSnapshots?.[0]?.score ?? null
 
   let trend = "stable"
   if (phSnapshots && phSnapshots.length >= 2) {
     const diff = phSnapshots[0].score - phSnapshots[phSnapshots.length - 1].score
-    if (diff > 5) trend = "improving"
+    if (diff > 5)       trend = "improving"
     else if (diff < -5) trend = "declining"
   }
 
   const scoreColor = (s: number | null) =>
-    s == null ? "var(--text-3)" : s >= 75 ? "var(--green)" : s >= 50 ? "var(--amber)" : "var(--red)"
+    s == null
+      ? "var(--text-3)"
+      : s >= 75 ? "var(--green)" : s >= 50 ? "var(--amber)" : "var(--red)"
 
-  const trendColor = trend === "improving" ? "var(--green)" : trend === "declining" ? "var(--red)" : "var(--text-3)"
+  const trendColor = trend === "improving"
+    ? "var(--green)"
+    : trend === "declining" ? "var(--red)" : "var(--text-3)"
 
   const sevPill = (s: string) =>
     s === "critical" ? "pill pill-red" : s === "high" ? "pill pill-amber" : "pill pill-blue"
@@ -57,12 +84,14 @@ export default async function Dashboard() {
         </div>
         <div className="card stat">
           <div className="label">Pipeline health</div>
-          <div className="val" style={{ color: scoreColor(pipelineHealth.score) }}>{pipelineHealth.score}</div>
+          <div className="val" style={{ color: scoreColor(pipelineScore) }}>{pipelineScore ?? "—"}</div>
           <div className="sub" style={{ color: trendColor }}>{trend}</div>
         </div>
         <div className="card stat">
           <div className="label">Active alerts</div>
-          <div className="val" style={{ color: alerts.length > 0 ? "var(--red)" : "var(--green)" }}>{alerts.length}</div>
+          <div className="val" style={{ color: alerts.length > 0 ? "var(--red)" : "var(--green)" }}>
+            {alerts.length}
+          </div>
           <div className="sub">{alerts.length === 0 ? "all clear" : "need attention"}</div>
         </div>
       </div>
@@ -90,9 +119,7 @@ export default async function Dashboard() {
                         day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
                       })}
                     </td>
-                    <td>
-                      <DismissAlert id={a.id} />
-                    </td>
+                    <td><DismissAlert id={a.id} /></td>
                   </tr>
                 ))}
               </tbody>

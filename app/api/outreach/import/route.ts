@@ -5,13 +5,19 @@
 // Returns { ok, imported, skipped }.
 
 import { NextRequest, NextResponse } from "next/server"
-import { supabase } from "@/lib/supabase"
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
 import { calculateLeadScore } from "@/lib/leadScore"
 import type { YTLeadCandidate } from "@/lib/ytDiscovery"
+import { requireCronAuth } from "@/lib/apiAuth"
 
 export const dynamic = "force-dynamic"
 
+type ExistingLead = { yt_channel_url: string | null }
+
 export async function POST(req: NextRequest) {
+  const authError = requireCronAuth(req)
+  if (authError) return authError
+
   let body: any
   try {
     body = await req.json()
@@ -24,14 +30,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "No leads provided" }, { status: 400 })
   }
 
-  // Fetch already-imported channel URLs so we can skip duplicates
+  // Fetch already-imported channel URLs for dedup
   const { data: existing } = await supabase
     .from("leads")
     .select("yt_channel_url")
     .not("yt_channel_url", "is", null)
 
   const existingUrls = new Set(
-    (existing ?? []).map((r) => r.yt_channel_url).filter(Boolean)
+    (existing ?? [] as ExistingLead[]).map((r: ExistingLead) => r.yt_channel_url).filter(Boolean)
   )
 
   const now      = new Date().toISOString()
@@ -44,7 +50,7 @@ export async function POST(req: NextRequest) {
       continue
     }
 
-    // Derive signal_uploads_weekly from uploads30d (4+ uploads = weekly cadence)
+    // 4+ uploads/30d = weekly publishing cadence
     const uploadsWeekly = c.uploads30d >= 4
 
     const score = calculateLeadScore({
@@ -65,18 +71,15 @@ export async function POST(req: NextRequest) {
       status:                "Outreach",
       stage_changed_at:      now,
       score,
-      // YT-specific fields
       yt_channel_url:        c.channelUrl,
       yt_avg_views:          c.avgViews,
       yt_uploads_30d:        c.uploads30d,
       yt_score:              c.ytScore,
-      // Scoring signals
       signal_warm_intro:     false,
       signal_outsourcing:    false,
       signal_uploads_weekly: uploadsWeekly,
       signal_monetized:      false,
-      // value left null — set manually once a deal is scoped
-      value: null,
+      value:                 null,   // set manually once a deal is scoped
     })
   }
 

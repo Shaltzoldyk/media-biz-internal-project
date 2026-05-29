@@ -5,14 +5,18 @@
 
 import { NextRequest, NextResponse } from "next/server"
 import { sendOutreachEmail } from "@/lib/ytOutreach"
-import { supabase } from "@/lib/supabase"
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
 import { logActivity } from "@/lib/activity"
+import { requireCronAuth } from "@/lib/apiAuth"
 
 export const dynamic = "force-dynamic"
 
 const HOURLY_LIMIT = 30
 
 export async function POST(req: NextRequest) {
+  const authError = requireCronAuth(req)
+  if (authError) return authError
+
   let body: any
   try {
     body = await req.json()
@@ -29,7 +33,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Fetch the lead to get the email address from its record
+  // Fetch the lead to confirm it exists
   const { data: lead } = await supabase
     .from("leads")
     .select("id, name, yt_channel_url")
@@ -40,10 +44,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Lead not found" }, { status: 404 })
   }
 
-  // Get email from outreach_log if already attempted, or from leads table
-  // The email is stored on the outreach_log row after first send.
-  // For a fresh lead, we need it from somewhere — the discovery page passes it.
-  // Accept it as an optional body param; fall back to a lookup.
+  // Email address comes from the discovery result — required in the request body
   const emailAddress: string = body.emailAddress ?? ""
   if (!emailAddress) {
     return NextResponse.json(
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest) {
     )
   }
 
-  // Check not already sent to this lead
+  // Dedup: don't send twice to the same lead
   const { data: existing } = await supabase
     .from("outreach_log")
     .select("id")
@@ -95,28 +96,28 @@ export async function POST(req: NextRequest) {
 
   const sentAt = new Date().toISOString()
 
-  // Write outreach_log row
-  await supabase.from("outreach_log").insert({
-    lead_id:       leadId,
-    email_address: emailAddress,
-    subject:       result.subject,
-    status:        "sent",
-    sent_at:       sentAt,
-    video_title:   result.videoTitle,
-  })
-
-  // Log to activity feed — appears on lead detail timeline automatically
-  await logActivity({
-    entityType: "lead",
-    entityId:   leadId,
-    type:       "outreach_sent",
-    message:    `Outreach email sent to ${emailAddress}`,
-    metadata: {
-      emailAddress,
-      subject:    result.subject,
-      videoTitle: result.videoTitle,
-    },
-  })
+  // Write outreach_log row and activity feed entry in parallel
+  await Promise.all([
+    supabase.from("outreach_log").insert({
+      lead_id:       leadId,
+      email_address: emailAddress,
+      subject:       result.subject,
+      status:        "sent",
+      sent_at:       sentAt,
+      video_title:   result.videoTitle,
+    }),
+    logActivity({
+      entityType: "lead",
+      entityId:   leadId,
+      type:       "outreach_sent",
+      message:    `Outreach email sent to ${emailAddress}`,
+      metadata: {
+        emailAddress,
+        subject:    result.subject,
+        videoTitle: result.videoTitle,
+      },
+    }),
+  ])
 
   return NextResponse.json({
     ok:           true,

@@ -1,90 +1,58 @@
-import { supabase } from "@/lib/supabase"
+// lib/conversion.ts
+//
+// Converts a Lead into a Client.
+//
+// The three-step operation (create client + update lead + link IDs) is wrapped
+// in a single Postgres transaction via the convert_lead_to_client() RPC function.
+// If any step fails, the DB rolls back automatically — no orphaned client rows,
+// no partial updates.
+//
+// Activity logging happens AFTER the transaction commits. It's intentionally
+// outside the transaction: a failed activity log should not roll back a
+// successful conversion, and the activity log is audit-only data.
+
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
 import { logActivity } from "@/lib/activity"
 
 export async function convertLeadToClient(leadId: string) {
-  // 1️⃣ Fetch Lead
-  const { data: lead, error: leadError } = await supabase
-    .from("leads")
-    .select("*")
-    .eq("id", leadId)
-    .single()
-
-  if (leadError || !lead) {
-    throw new Error("Lead not found")
-  }
-
-  if (lead.converted) {
-    throw new Error("Lead already converted")
-  }
-
-  // 2️⃣ Create Client
-  const { data: client, error: clientError } = await supabase
-    .from("clients")
-    .insert({
-      lead_id: lead.id,
-      name: lead.name,
-      company: lead.brand_name,
-      contract_value: lead.value,
-      billing_type: "monthly",
-      start_date: new Date().toISOString().split("T")[0],
-    })
-    .select()
-    .single()
-
-  if (clientError || !client) {
-    throw new Error(clientError?.message || "Failed to create client")
-  }
-
-  // 3️⃣ Update Lead as Converted
-  // stage_at_conversion records which pipeline stage this lead was in at the
-  // moment of conversion. This is the correct input for the self-learning
-  // probability engine — not the lead's current status, which never changes
-  // after conversion and so tells you nothing about where in the funnel
-  // the deal was won.
-  const conversionTimestamp = new Date().toISOString()
-
-  const { error: updateError } = await supabase
-    .from("leads")
-    .update({
-      converted: true,
-      converted_at: conversionTimestamp,
-      client_id: client.id,
-      stage_at_conversion: lead.status,
-    })
-    .eq("id", lead.id)
-
-  if (updateError) {
-    // Lead update failed — delete the client we just created so we don't
-    // leave an orphaned row. Re-attempting conversion would otherwise create
-    // a duplicate client (step 2 has no duplicate guard).
-    await supabase.from("clients").delete().eq("id", client.id)
-    throw new Error(updateError.message)
-  }
-
-  // 4️⃣ 🔥 ACTIVITY LOGGING (Phase 4)
-
-  // Log on lead
-  await logActivity({
-    entityType: "lead",
-    entityId: lead.id,
-    type: "conversion",
-    metadata: {
-      convertedToClientId: client.id,
-      contractValue: lead.value,
-      billingType: "monthly",
-    },
+  // Single atomic RPC — create client + update lead in one transaction.
+  // The SQL function raises an exception if the lead is not found or
+  // has already been converted, which surfaces here as a non-null error.
+  const { data: client, error } = await supabase.rpc("convert_lead_to_client", {
+    p_lead_id: leadId,
   })
 
-  // Log on client
-  await logActivity({
-    entityType: "client",
-    entityId: client.id,
-    type: "conversion",
-    metadata: {
-      fromLeadId: lead.id,
-      originalLeadStatus: lead.status,
-    },
-  })
+  if (error) {
+    // Postgres RAISE EXCEPTION messages come through in error.message
+    throw new Error(error.message || "Conversion failed")
+  }
+
+  if (!client) {
+    throw new Error("Conversion returned no client data")
+  }
+
+  // Activity logging — outside the transaction intentionally (see header note)
+  await Promise.all([
+    logActivity({
+      entityType: "lead",
+      entityId:   leadId,
+      type:       "conversion",
+      metadata: {
+        convertedToClientId: client.id,
+        contractValue:       client.contract_value,
+        billingType:         client.billing_type,
+      },
+    }),
+    logActivity({
+      entityType: "client",
+      entityId:   client.id,
+      type:       "conversion",
+      metadata: {
+        fromLeadId:          leadId,
+        originalLeadStatus:  client.stage_at_conversion,
+      },
+    }),
+  ])
 
   return client
 }

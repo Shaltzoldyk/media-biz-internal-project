@@ -1,4 +1,5 @@
-import { supabase } from "@/lib/supabase"
+// lib/intelligenceRunner.ts
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
 import {
   detectStuckLeads,
   detectAtRiskClients,
@@ -10,6 +11,7 @@ import {
 import { Lead } from "@/types/lead"
 import { logActivity } from "./activity"
 import { runAutomationCycle } from "./automationEngine"
+import { calculatePipelineHealth } from "./pipelineHealthEngine"
 
 /* ================================
    SEVERITY RANKING
@@ -24,9 +26,6 @@ const severityRank: Record<StuckSeverity | ClientRiskSeverity, number> = {
 /* ================================
    SHARED DATA TYPES
 ================================ */
-
-// Minimal column sets — each engine only gets what it needs.
-// Adding a column here? Update the .select() string in fetchSharedData too.
 
 export type LeadRow = Pick<
   Lead,
@@ -51,6 +50,10 @@ export type RevenueRow = {
   id: string
   client_id: string
   amount: number
+  // revenue_date is the canonical "when did this payment occur" field.
+  // Use this for all date-based revenue logic — it represents the actual
+  // payment date and can be backdated. created_at is when the row was
+  // inserted and is not meaningful for business calculations.
   revenue_date: string
   created_at: string
 }
@@ -60,6 +63,16 @@ export type RevenueRow = {
 ================================ */
 
 async function fetchSharedData() {
+  // FIX: revenue_records scoped to the last 90 days by revenue_date.
+  // Previously fetched the entire table on every cron cycle.
+  // 90 days covers:
+  //   • monthly billing anniversary checks (max 31 days lookback)
+  //   • revenue drop detection (max 14 days lookback)
+  //   • any reasonable trend analysis
+  const ninetyDaysAgo = new Date(
+    Date.now() - 90 * 24 * 60 * 60 * 1000
+  ).toISOString()
+
   const [{ data: leads }, { data: clients }, { data: revenue }] =
     await Promise.all([
       supabase
@@ -70,7 +83,8 @@ async function fetchSharedData() {
         .select("id, name, billing_type, start_date, status"),
       supabase
         .from("revenue_records")
-        .select("id, client_id, amount, revenue_date, created_at"),
+        .select("id, client_id, amount, revenue_date, created_at")
+        .gte("revenue_date", ninetyDaysAgo),
     ])
 
   return {
@@ -85,21 +99,19 @@ async function fetchSharedData() {
 ================================ */
 
 export async function runIntelligenceChecks() {
-  // Fetch all shared data once — all downstream functions receive it as args.
-  // Never fetch leads/clients/revenue inside a sub-function of this runner.
   const shared = await fetchSharedData()
 
   await Promise.all([
     runStuckLeadCheck(shared.leads),
     runClientRiskCheck(shared.clients, shared.revenue),
     runSystemHealthSnapshot(shared.leads, shared.clients, shared.revenue),
+    runPipelineHealthSnapshot(),
     runAutomationCycle(shared.leads, shared.revenue),
   ])
 }
 
 /* ================================
    STUCK LEAD CHECK
-   P-3: batch activity lookup — 1 query for all stuck leads, not N
 ================================ */
 
 async function runStuckLeadCheck(leads: LeadRow[]) {
@@ -108,7 +120,6 @@ async function runStuckLeadCheck(leads: LeadRow[]) {
 
   const stuckIds = stuckLeads.map((l) => l.leadId)
 
-  // One query for all stuck lead IDs
   const { data: recentFlags } = await supabase
     .from("activities")
     .select("entity_id, severity")
@@ -117,7 +128,6 @@ async function runStuckLeadCheck(leads: LeadRow[]) {
     .in("entity_id", stuckIds)
     .order("created_at", { ascending: false })
 
-  // Build a Map: entity_id → most recent severity (first occurrence wins due to ordering)
   const lastSeverityMap = new Map<string, string>()
   for (const row of recentFlags || []) {
     if (!lastSeverityMap.has(row.entity_id)) {
@@ -151,7 +161,6 @@ async function runStuckLeadCheck(leads: LeadRow[]) {
 
 /* ================================
    CLIENT REVENUE RISK CHECK
-   P-3: batch activity lookup — 1 query for all at-risk clients, not N
 ================================ */
 
 async function runClientRiskCheck(clients: ClientRow[], revenue: RevenueRow[]) {
@@ -218,10 +227,10 @@ async function runSystemHealthSnapshot(
 
   if (existing && existing.length > 0) return
 
-  const stuckLeads  = detectStuckLeads(leads as Lead[])
-  const overdue     = detectOverdueFollowUps(leads as Lead[])
-  const atRisk      = detectAtRiskClients(clients, revenue)
-  const health      = calculateSystemHealth(stuckLeads, overdue, atRisk)
+  const stuckLeads = detectStuckLeads(leads as Lead[])
+  const overdue    = detectOverdueFollowUps(leads as Lead[])
+  const atRisk     = detectAtRiskClients(clients, revenue)
+  const health     = calculateSystemHealth(stuckLeads, overdue, atRisk)
 
   await supabase.from("system_health_snapshots").insert({
     score:           health.score,
@@ -229,5 +238,32 @@ async function runSystemHealthSnapshot(
     overdue_penalty: health.breakdown.overduePenalty,
     revenue_penalty: health.breakdown.revenuePenalty,
     snapshot_date:   todayStr,
+  })
+}
+
+/* ================================
+   PIPELINE HEALTH SNAPSHOT
+   FIX: Dashboard now reads from this table rather than calling
+   calculatePipelineHealth() live on every page render. The cron
+   writes once per day; the page is a pure read.
+================================ */
+
+async function runPipelineHealthSnapshot() {
+  const todayStr = new Date().toISOString().split("T")[0]
+
+  const { data: existing } = await supabase
+    .from("pipeline_health_snapshots")
+    .select("id")
+    .eq("snapshot_date", todayStr)
+    .limit(1)
+
+  // Already written today — nothing to do
+  if (existing && existing.length > 0) return
+
+  const { score } = await calculatePipelineHealth()
+
+  await supabase.from("pipeline_health_snapshots").insert({
+    score,
+    snapshot_date: todayStr,
   })
 }

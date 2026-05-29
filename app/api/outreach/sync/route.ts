@@ -2,35 +2,29 @@
 //
 // GET — checks Gmail INBOX for replies from all "sent" contacts, updates outreach_log.
 // Called by Vercel Cron every 6 hours (see vercel.json).
-// Same auth guard pattern as /api/intelligence/run.
 
 import { NextRequest, NextResponse } from "next/server"
 import { checkReplies } from "@/lib/ytOutreach"
-import { supabase } from "@/lib/supabase"
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
 import { logActivity } from "@/lib/activity"
+import { requireCronAuth } from "@/lib/apiAuth"
 
 export const dynamic = "force-dynamic"
 
+type SentRow = {
+  id:            string
+  lead_id:       string
+  email_address: string
+}
+
 export async function GET(request: NextRequest) {
-  // Auth guard — skipped in local dev, required in production
-  if (process.env.NODE_ENV === "production") {
-    const cronSecret = process.env.CRON_SECRET
-    const authHeader = request.headers.get("authorization")
-
-    if (!cronSecret) {
-      console.error("CRON_SECRET env var is not set")
-      return NextResponse.json({ ok: false, error: "Server misconfiguration" }, { status: 500 })
-    }
-
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 })
-    }
-  }
+  const authError = requireCronAuth(request)
+  if (authError) return authError
 
   const start = Date.now()
 
   try {
-    // Fetch all "sent" rows — these are the ones we need to check for replies
+    // Fetch all rows still in "sent" state — these need reply checking
     const { data: sentRows, error } = await supabase
       .from("outreach_log")
       .select("id, lead_id, email_address")
@@ -41,18 +35,19 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ ok: true, checked: 0, newReplies: 0, durationMs: Date.now() - start })
     }
 
-    const emailAddresses = sentRows.map((r) => r.email_address)
+    const rows           = sentRows as SentRow[]
+    const emailAddresses = rows.map((r: SentRow) => r.email_address)
     const replied        = await checkReplies(emailAddresses)
 
     if (replied.size === 0) {
       return NextResponse.json({ ok: true, checked: emailAddresses.length, newReplies: 0, durationMs: Date.now() - start })
     }
 
-    // Update each row that has a reply
-    const now         = new Date().toISOString()
-    const updateJobs  = sentRows
-      .filter((r) => replied.has(r.email_address))
-      .map(async (row) => {
+    // Update replied rows + log activity in parallel
+    const now        = new Date().toISOString()
+    const updateJobs = rows
+      .filter((r: SentRow) => replied.has(r.email_address))
+      .map(async (row: SentRow) => {
         await Promise.all([
           supabase
             .from("outreach_log")
