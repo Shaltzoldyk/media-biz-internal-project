@@ -5,12 +5,13 @@ import { getAdaptiveRevenueDropThreshold } from "@/lib/adaptiveThresholdEngine"
 import { getAdaptiveStageThreshold } from "@/lib/adaptivePipelineThresholdEngine"
 import { handleStalledOutreachLeads, resolveOutreachAlerts } from "@/lib/outreachAutomation"
 import type { LeadRow, RevenueRow } from "@/lib/intelligenceRunner"
+import { PIPELINE } from "@/lib/config"
 
-const HIGH_VALUE_THRESHOLD   = 5000
-const STALLED_DAYS_THRESHOLD = 5
-const ESCALATION_DAYS        = 3
-const MIN_STAGE_SAMPLE_SIZE  = 5
-const AGING_RISK_THRESHOLD   = 0.35
+const HIGH_VALUE_THRESHOLD   = PIPELINE.HIGH_VALUE_THRESHOLD
+const STALLED_DAYS_THRESHOLD = PIPELINE.STALLED_DAYS_THRESHOLD
+const ESCALATION_DAYS        = PIPELINE.ESCALATION_DAYS
+const MIN_STAGE_SAMPLE_SIZE  = PIPELINE.MIN_STAGE_SAMPLE_SIZE
+const AGING_RISK_THRESHOLD   = PIPELINE.AGING_RISK_THRESHOLD
 
 /* ================================
    PUBLIC RUNNER
@@ -236,27 +237,24 @@ async function handleStageBottlenecks(leads: LeadRow[]) {
 
   const adaptiveThreshold = await getAdaptiveStageThreshold(leads)
 
-  const stageTotals: Record<string, number> = {}
-  let totalConverted = 0
-  let totalActive    = 0
+  const stageTotals:      Record<string, number> = {}
+  const stageConversions: Record<string, number> = {}
 
   for (const lead of leads) {
     const stage = lead.status
     if (!stage) continue
     stageTotals[stage] = (stageTotals[stage] || 0) + 1
-    if (lead.converted === true) totalConverted++
-    if (stage !== "Client" && stage !== "Lost") totalActive++
+
+    // FIX: use actual stage_at_conversion counts, not proportional approximation
+    if (lead.converted === true && lead.stage_at_conversion) {
+      stageConversions[lead.stage_at_conversion] =
+        (stageConversions[lead.stage_at_conversion] || 0) + 1
+    }
   }
 
-  const stageConversions: Record<string, number> = {}
   const nonTerminalStages = Object.keys(stageTotals).filter(
     (s) => s !== "Client" && s !== "Lost"
   )
-
-  for (const stage of nonTerminalStages) {
-    stageConversions[stage] =
-      totalActive > 0 ? totalConverted * (stageTotals[stage] / totalActive) : 0
-  }
 
   const bottleneckStages = nonTerminalStages.filter((stage) => {
     const total = stageTotals[stage]

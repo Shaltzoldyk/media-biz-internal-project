@@ -18,8 +18,6 @@ import { useState, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
 import { Lead } from "@/types/lead"
 import { getStageStatus } from "@/lib/stageVelocity"
-import { convertLeadToClient } from "@/lib/conversion"
-import { logActivity } from "@/lib/activity"
 import { useCurrency } from "@/context/CurrencyContext"
 
 const statuses = [
@@ -91,10 +89,9 @@ export default function PipelineBoard({
       )
     )
 
-    const { error } = await supabase
-      .from("leads")
-      .update(updatePayload)
-      .eq("id", leadId)
+    const updateRes = await fetch(`/api/leads/${leadId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patch: updatePayload }) })
+    const updateData = await updateRes.json().catch(() => ({}))
+    const error = updateRes.ok ? null : { message: updateData.error ?? "Update failed" }
 
     if (error) {
       // Rollback UI
@@ -108,14 +105,10 @@ export default function PipelineBoard({
 
     // 🔒 Guard 3: Log only after confirmed DB update
     try {
-      await logActivity({
-        entityType: "lead",
-        entityId: leadId,
-        type: "status_change",
-        metadata: {
-          from: previousStatus,
-          to: newStatus,
-        },
+      await fetch(`/api/leads/${leadId}/activity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "status_change", metadata: { from: previousStatus, to: newStatus } }),
       })
     } catch (err) {
       console.error("Activity logging failed:", err)
@@ -124,15 +117,14 @@ export default function PipelineBoard({
     // 🔥 Auto-convert to client if needed
     if (newStatus === "Client" && !lead.converted) {
       try {
-        await convertLeadToClient(leadId)
+        const res = await fetch(`/api/leads/${leadId}/convert`, { method: "POST" })
+        if (!res.ok) { const body = await res.json().catch(() => ({}))
+        throw new Error(body.error ?? "Conversion failed") }
       } catch (err) {
         console.error("Conversion failed:", err)
 
         // Rollback DB
-        await supabase
-          .from("leads")
-          .update({ status: previousStatus })
-          .eq("id", leadId)
+        await fetch(`/api/leads/${leadId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patch: { status: previousStatus } }) })
 
         // Rollback UI
         setLeads((prev) =>

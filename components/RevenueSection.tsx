@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react"
 import { supabase } from "@/lib/supabase"
-import { logActivity } from "@/lib/activity"
 import { useCurrency } from "@/context/CurrencyContext"
 
 function calcPeriods(startDate: string, billing: string): number {
@@ -45,7 +44,7 @@ export default function RevenueSection({ client }: { client: any }) {
       .insert({ client_id:client.id, amount:amt, revenue_date:date, type:"payment" })
       .select().single()
     if (!error) {
-      await logActivity({ entityType:"client", entityId:client.id, type:"payment_logged", metadata:{ paymentId:data.id, amount:amt, revenueDate:date } })
+      await fetch(`/api/clients/${client.id}/activity`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ type:"payment_logged", metadata:{ paymentId:data.id, amount:amt, revenueDate:date } }) })
     }
     setAmount(""); setAdding(false); setShowInput(false)
     fetchRecords()
@@ -54,8 +53,8 @@ export default function RevenueSection({ client }: { client: any }) {
   const deletePayment = async (id: string) => {
     const r = records.find((x) => x.id === id)
     if (!r) return
-    await supabase.from("revenue_records").delete().eq("id", id)
-    await logActivity({ entityType:"client", entityId:client.id, type:"payment_deleted", metadata:{ paymentId:id, amount:r.amount } })
+    await fetch(`/api/revenue-records/${id}`, { method: "DELETE" })
+    await fetch(`/api/clients/${client.id}/activity`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ type:"payment_deleted", metadata:{ paymentId:id, amount:r.amount } }) })
     fetchRecords()
   }
 

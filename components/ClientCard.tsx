@@ -4,7 +4,6 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import RevenueSection from "./RevenueSection"
-import { logActivity } from "@/lib/activity"
 import { useCurrency } from "@/context/CurrencyContext"
 
 const billingLabel: Record<string,string> = {
@@ -27,10 +26,7 @@ export default function ClientCard({ client }: { client: any }) {
       .update({ contract_value: value, billing_type: billing })
       .eq("id", client.id)
     if (!error && (Number(client.contract_value) !== Number(value) || client.billing_type !== billing)) {
-      await logActivity({
-        entityType:"client", entityId:client.id, type:"contract_update",
-        metadata:{ previousValue:client.contract_value, newValue:value, previousBilling:client.billing_type, newBilling:billing },
-      })
+      await fetch(`/api/clients/${client.id}/activity`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ type:"contract_update", metadata:{ previousValue:client.contract_value, newValue:value, previousBilling:client.billing_type, newBilling:billing } }) })
     }
     setSaving(false); setEditing(false)
     location.reload()
@@ -41,20 +37,21 @@ export default function ClientCard({ client }: { client: any }) {
     setDeleting(true)
 
     // Log before deleting so the activity write succeeds while the client still exists
-    await logActivity({
-      entityType: "client",
-      entityId:   client.id,
-      type:       "client_deleted",
-      metadata:   {
-        name:           client.name,
-        contract_value: client.contract_value,
-        billing_type:   client.billing_type,
-      },
+    await fetch(`/api/clients/${client.id}/activity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "client_deleted",
+        metadata: {
+          name:           client.name,
+          contract_value: client.contract_value,
+          billing_type:   client.billing_type,
+        },
+      }),
     })
 
-    // Delete revenue records first (FK constraint)
-    await supabase.from("revenue_records").delete().eq("client_id", client.id)
-    await supabase.from("clients").delete().eq("id", client.id)
+    // Delete via API — service client handles revenue_records FK then client
+    await fetch(`/api/clients/${client.id}`, { method: "DELETE" })
 
     router.refresh()
   }

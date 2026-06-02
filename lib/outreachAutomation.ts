@@ -4,12 +4,13 @@
 // Same shape as every existing job — receive pre-fetched leads, no own DB fetches
 // for lead data, write to automations_log + activities on trigger.
 
-import { supabase } from "@/lib/supabase"
+import { supabaseServer as supabase } from "@/lib/supabaseServer"
+import { OUTREACH } from "@/lib/config"
 import type { LeadRow } from "@/lib/intelligenceRunner"
 
 // How many days a lead can sit in Outreach with no email sent before flagging.
 // Kept low (3 days) since outreach goes cold fast.
-const OUTREACH_STALL_DAYS = 3
+const OUTREACH_STALL_DAYS = OUTREACH.STALL_DAYS
 
 // ─── Job 1: Flag Outreach-stage leads with no email sent ─────────────────────
 //

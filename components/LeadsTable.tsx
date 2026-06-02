@@ -5,7 +5,6 @@ import Link from "next/link"
 import { supabase } from "@/lib/supabase"
 import { getStageStatus } from "@/lib/stageVelocity"
 import { Lead } from "@/types/lead"
-import { logActivity } from "@/lib/activity"
 import { useCurrency } from "@/context/CurrencyContext"
 
 const STATUS_OPTIONS = ["New","Outreach","Qualified","Contacted","Responded","Call Booked","Client","Lost"]
@@ -25,39 +24,27 @@ export default function LeadsTable({ initialLeads }: { initialLeads: Lead[] }) {
       patch.last_contacted_at = ts
 
     setLeads((p) => p.map((l) => l.id === id ? { ...l, ...patch } : l))
-    const { error } = await supabase.from("leads").update(patch).eq("id", id)
-    if (error) {
+    const updateRes = await fetch(`/api/leads/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patch }) })
+    if (!updateRes.ok) {
       setLeads((p) => p.map((l) => l.id === id ? { ...l, status: prev } : l))
       return
     }
-    await logActivity({
-      entityType: "lead", entityId: id,
-      type: "status_change",                        // ✓ valid ActivityType
-      metadata: { from: prev, to: newStatus },
-    })
+    await fetch(`/api/leads/${id}/activity`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "status_change", metadata: { from: prev, to: newStatus } }) })
   }
 
   const updateFollowUp = async (id: string, date: string) => {
     setLeads((p) => p.map((l) => l.id === id ? { ...l, follow_up_date: date } : l))
     setEditing(null)
-    await supabase.from("leads").update({ follow_up_date: date }).eq("id", id)
-    await logActivity({
-      entityType: "lead", entityId: id,
-      type: "follow_up",                            // ✓ "follow_up_set" → "follow_up"
-      metadata: { date },
-    })
+    await fetch(`/api/leads/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patch: { follow_up_date: date } }) })
+    await fetch(`/api/leads/${id}/activity`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "follow_up", metadata: { date } }) })
   }
 
   const deleteLead = async (id: string) => {
     const lead = leads.find((l) => l.id === id)
     if (!lead || !confirm(`Delete ${lead.name}?`)) return
     setLeads((p) => p.filter((l) => l.id !== id))
-    await supabase.from("leads").delete().eq("id", id)
-    await logActivity({
-      entityType: "lead", entityId: id,
-      type: "note",                                 // ✓ "lead_deleted" → "note" with metadata
-      metadata: { action: "lead_deleted", name: lead.name, finalStatus: lead.status },
-    })
+    await fetch(`/api/leads/${id}`, { method: "DELETE" })
+    await fetch(`/api/leads/${id}/activity`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "note", metadata: { action: "lead_deleted", name: lead.name, finalStatus: lead.status } }) })
   }
 
   if (!leads.length) return (

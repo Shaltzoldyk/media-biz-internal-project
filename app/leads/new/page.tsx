@@ -4,7 +4,6 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { supabase } from "@/lib/supabase"
 import { calculateLeadScore } from "@/lib/leadScore"
-import { logActivity } from "@/lib/activity"
 
 const PLATFORMS = ["YouTube","Instagram","Twitter","LinkedIn","Podcast","Newsletter","Other"]
 
@@ -53,7 +52,7 @@ export default function NewLeadPage() {
 
     if (err || !lead) { setError("Failed to create lead."); setLoading(false); return }
 
-    await logActivity({ entityType: "lead", entityId: lead.id, type: "lead_created", metadata: { name: lead.name, score, platform } })
+    await fetch(`/api/leads/${lead.id}/activity`, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ type:"lead_created", metadata:{ name:lead.name, score, platform } }) })
     router.push("/leads")
   }
 
