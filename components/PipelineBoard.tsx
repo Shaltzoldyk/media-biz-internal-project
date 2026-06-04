@@ -245,6 +245,15 @@ function SortableLeadCard({ lead }: { lead: Lead }) {
       ? "border-l-yellow-500"
       : "border-l-red-500"
 
+  const daysInStage = lead.stage_changed_at
+    ? Math.floor((Date.now() - new Date(lead.stage_changed_at).getTime()) / (1000 * 60 * 60 * 24))
+    : null
+
+  const daysColor =
+    velocity === "green"  ? "text-green-400"
+    : velocity === "yellow" ? "text-yellow-400"
+    : "text-red-400"
+
   return (
     <div
       ref={setNodeRef}
@@ -257,7 +266,12 @@ function SortableLeadCard({ lead }: { lead: Lead }) {
         <div className="text-sm font-medium truncate">
           {lead.name}
         </div>
-        <div className="text-xs">🔥 {lead.score || 0}/10</div>
+        {/* Days in stage — same colour as the velocity border so they read as one signal */}
+        {daysInStage !== null && (
+          <div className={`text-xs font-mono flex-shrink-0 ml-1 ${daysColor}`}>
+            {daysInStage}d
+          </div>
+        )}
       </div>
 
       <div className="text-xs text-zinc-400 mt-1 truncate">
@@ -267,8 +281,9 @@ function SortableLeadCard({ lead }: { lead: Lead }) {
           : "-"}
       </div>
 
-      <div className="text-xs mt-1">
-        {fmt(lead.value)}
+      <div className="flex justify-between items-center mt-1">
+        <div className="text-xs">{fmt(lead.value)}</div>
+        <div className="text-xs text-zinc-500">🔥 {lead.score || 0}/10</div>
       </div>
     </div>
   )
